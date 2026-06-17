@@ -1,76 +1,1100 @@
-# Guardian Recovery Orchestrator Implementation Contract
+# Guardian Recovery Orchestrator Contract
 
 ## 1. Purpose
 
-Defines implementation rules for snapshot restore, recovery jobs, and verification.
+This contract defines how Guardian recovery jobs are planned, executed, verified, logged, and certified.
 
-This document converts Guardian architecture into implementation-level requirements.
-
----
-
-## 2. Scope
-
-This contract applies to Guardian runtime implementation, tests, certification, and future module expansion.
+Recovery is not the first line of defense. Guardian must contain the incident first, then recover safely.
 
 ---
 
-## 3. Implementation Rules
+## 2. Global Recovery Rules
 
-- Must trace to governance, architecture, threat model, and system contracts.
-- Must preserve Security Kernel priority.
-- Must not bypass FakePerms.
-- Must not block AntiNuke hot paths.
-- Must produce forensic evidence where security decisions are made.
-- Must be testable and certifiable.
-
----
-
-## 4. Required Fields
-
-Every implementation artifact must define:
-
-- Name
-- Owner
-- Inputs
-- Outputs
-- Failure behavior
-- Logging requirements
-- Test requirements
-- Certification requirements
-- Anti-drift rule
+- Containment comes before recovery.
+- Recovery must use snapshots or verified source state.
+- Recovery must use restore plans, not blind replay.
+- Recovery must not restore unsafe permissions blindly.
+- Recovery must not restore dangerous roles to users blindly.
+- Recovery must preserve forensic evidence.
+- Recovery must verify final Discord state.
+- Partial failures must be visible.
+- Every recovery job must be tied to an incident.
 
 ---
 
-## 5. Failure Behavior
+## 3. Recovery Job Required Fields
 
-Failures must be explicit.
+Every recovery job must include:
 
-Security-critical failures must not be silent.
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- requested_by
+- recovery_type
+- status
+- started_at
+- completed_at
+- plan
+- result
+- verification_status
+- errors
+- final_verdict
 
-Dangerous authority failures must fail closed.
+---
+## Area: Recovery Job Lifecycle
 
-Recovery and operational failures must fail visibly.
+### Purpose
+Defines recovery orchestration requirements for `RECOVERY_JOB_LIFECYCLE`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
 
 ---
 
-## 6. Testing Requirements
+## Area: Snapshot Selection
 
-Implementation must include:
+### Purpose
+Defines recovery orchestration requirements for `SNAPSHOT_SELECTION`.
 
-- Unit tests
-- Integration tests
-- Regression tests
-- Failure-path tests
-- Certification evidence where required
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
 
 ---
 
-## 7. Certification Requirements
+## Area: Snapshot Validation
 
-This contract is satisfied only when implementation behavior is proven by tests, logs, and drill evidence.
+### Purpose
+Defines recovery orchestration requirements for `SNAPSHOT_VALIDATION`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
 
 ---
 
-## 8. Anti-Drift Rule
+## Area: Restore Planning
 
-No implementation may introduce behavior outside this contract without updating the relevant architecture, threat model, data model, testing, and certification documents.
+### Purpose
+Defines recovery orchestration requirements for `RESTORE_PLANNING`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Channel Restore
+
+### Purpose
+Defines recovery orchestration requirements for `CHANNEL_RESTORE`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Category Restore
+
+### Purpose
+Defines recovery orchestration requirements for `CATEGORY_RESTORE`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Role Restore
+
+### Purpose
+Defines recovery orchestration requirements for `ROLE_RESTORE`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Permission Overwrite Restore
+
+### Purpose
+Defines recovery orchestration requirements for `PERMISSION_OVERWRITE_RESTORE`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Logging Route Restore
+
+### Purpose
+Defines recovery orchestration requirements for `LOGGING_ROUTE_RESTORE`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Webhook Cleanup
+
+### Purpose
+Defines recovery orchestration requirements for `WEBHOOK_CLEANUP`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Safe Restore Rules
+
+### Purpose
+Defines recovery orchestration requirements for `SAFE_RESTORE_RULES`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Dangerous Permission Filtering
+
+### Purpose
+Defines recovery orchestration requirements for `DANGEROUS_PERMISSION_FILTERING`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Dangerous Role Filtering
+
+### Purpose
+Defines recovery orchestration requirements for `DANGEROUS_ROLE_FILTERING`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Verification
+
+### Purpose
+Defines recovery orchestration requirements for `VERIFICATION`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Partial Failure Handling
+
+### Purpose
+Defines recovery orchestration requirements for `PARTIAL_FAILURE_HANDLING`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Recovery Evidence
+
+### Purpose
+Defines recovery orchestration requirements for `RECOVERY_EVIDENCE`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Recovery Certification
+
+### Purpose
+Defines recovery orchestration requirements for `RECOVERY_CERTIFICATION`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Rollback
+
+### Purpose
+Defines recovery orchestration requirements for `ROLLBACK`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Area: Operator Review
+
+### Purpose
+Defines recovery orchestration requirements for `OPERATOR_REVIEW`.
+
+### Preconditions
+- Incident must be identified.
+- Containment status must be checked.
+- Snapshot availability must be checked where required.
+- Operator authority must be checked for manual recovery.
+
+### Execution Rules
+- Use explicit recovery plan.
+- Execute only approved recovery actions.
+- Preserve old and new state references.
+- Respect Discord rate limits.
+- Do not overwrite evidence.
+
+### Safety Rules
+- Do not blindly restore dangerous permissions.
+- Do not blindly restore dangerous roles.
+- Do not restore compromised webhook state.
+- Do not remove incident evidence.
+
+### Verification Requirements
+- Verify Discord state after execution.
+- Verify restored objects exist.
+- Verify permissions are safe.
+- Record partial failures.
+
+### Evidence Requirements
+- recovery_job_id
+- incident_id
+- guild_id
+- snapshot_id
+- action list
+- execution result
+- verification result
+- final verdict
+
+### Failure Handling
+- Mark recovery as partial or failed.
+- Preserve failure reason.
+- Do not retry blindly.
+- Escalate to operator when required.
+
+### Certification Requirements
+- Unit test.
+- Integration restore test.
+- Snapshot validation test.
+- Failure-path test.
+- Live drill where destructive recovery is involved.
+
+---
+
+## Anti-Drift Rule
+
+No recovery behavior may be implemented unless it documents:
+
+- Recovery trigger
+- Snapshot dependency
+- Restore plan
+- Safety filter
+- Verification method
+- Evidence output
+- Certification test
