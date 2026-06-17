@@ -1,5 +1,5 @@
 ## main...origin/main
-?? final-check.txt
+ M final-check.txt
 * main
   origin/main
 v0.1-foundation
@@ -26,6 +26,7 @@ v2.9-recovery-orchestrator-contract
 v3.0-testing-framework
 v4.0-build-execution-framework
 v5.0-certification-framework
+v5.1-final-documentation-verification
 === Empty files ===
 0
 === Line counts ===
