@@ -2,75 +2,932 @@
 
 ## 1. Purpose
 
-Defines all allowed punishment and containment actions Guardian may execute.
+This catalog defines every approved punishment, containment, and emergency response action Guardian may execute.
 
-This document converts Guardian architecture into implementation-level requirements.
-
----
-
-## 2. Scope
-
-This contract applies to Guardian runtime implementation, tests, certification, and future module expansion.
+No punishment action may be implemented outside this catalog without architecture review.
 
 ---
 
-## 3. Implementation Rules
+## 2. Global Rules
 
-- Must trace to governance, architecture, threat model, and system contracts.
-- Must preserve Security Kernel priority.
-- Must not bypass FakePerms.
-- Must not block AntiNuke hot paths.
-- Must produce forensic evidence where security decisions are made.
-- Must be testable and certifiable.
-
----
-
-## 4. Required Fields
-
-Every implementation artifact must define:
-
-- Name
-- Owner
-- Inputs
-- Outputs
-- Failure behavior
-- Logging requirements
-- Test requirements
-- Certification requirements
-- Anti-drift rule
+- Punishment must be evidence-based.
+- Punishment must respect FakePerms.
+- Punishment must deduplicate repeated actions.
+- Punishment must produce forensic logs.
+- Containment comes before recovery.
+- Dangerous role removal must happen quickly.
+- Unauthorized bot removal must be prioritized.
+- Webhook freeze/delete must preserve evidence.
+- Lockdown must be real, not cosmetic.
+- Failure must be visible.
 
 ---
 
-## 5. Failure Behavior
+## 3. Execution Ordering
 
-Failures must be explicit.
+Recommended order during active destructive events:
 
-Security-critical failures must not be silent.
+1. Contain immediate threat.
+2. Remove dangerous access.
+3. Punish unauthorized actor.
+4. Freeze webhook or integration persistence.
+5. Queue safe recovery.
+6. Record forensic evidence.
+7. Produce final incident verdict.
 
-Dangerous authority failures must fail closed.
+---
+## Action: BAN_ACTOR
 
-Recovery and operational failures must fail visibly.
+### Purpose
+Defines the approved behavior for `BAN_ACTOR`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
 
 ---
 
-## 6. Testing Requirements
+## Action: KICK_ACTOR
 
-Implementation must include:
+### Purpose
+Defines the approved behavior for `KICK_ACTOR`.
 
-- Unit tests
-- Integration tests
-- Regression tests
-- Failure-path tests
-- Certification evidence where required
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
 
 ---
 
-## 7. Certification Requirements
+## Action: TIMEOUT_ACTOR
 
-This contract is satisfied only when implementation behavior is proven by tests, logs, and drill evidence.
+### Purpose
+Defines the approved behavior for `TIMEOUT_ACTOR`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
 
 ---
 
-## 8. Anti-Drift Rule
+## Action: NEUTRALIZE_ACTOR
 
-No implementation may introduce behavior outside this contract without updating the relevant architecture, threat model, data model, testing, and certification documents.
+### Purpose
+Defines the approved behavior for `NEUTRALIZE_ACTOR`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: NEUTRALIZE_TARGET
+
+### Purpose
+Defines the approved behavior for `NEUTRALIZE_TARGET`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: REMOVE_DANGEROUS_ROLE
+
+### Purpose
+Defines the approved behavior for `REMOVE_DANGEROUS_ROLE`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: STRIP_DANGEROUS_PERMISSIONS
+
+### Purpose
+Defines the approved behavior for `STRIP_DANGEROUS_PERMISSIONS`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: REMOVE_UNAUTHORIZED_BOT
+
+### Purpose
+Defines the approved behavior for `REMOVE_UNAUTHORIZED_BOT`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: FREEZE_WEBHOOK
+
+### Purpose
+Defines the approved behavior for `FREEZE_WEBHOOK`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: DELETE_WEBHOOK
+
+### Purpose
+Defines the approved behavior for `DELETE_WEBHOOK`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: REVOKE_INVITE
+
+### Purpose
+Defines the approved behavior for `REVOKE_INVITE`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: LOCK_CHANNEL
+
+### Purpose
+Defines the approved behavior for `LOCK_CHANNEL`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: LOCK_GUILD
+
+### Purpose
+Defines the approved behavior for `LOCK_GUILD`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: PANIC_MODE
+
+### Purpose
+Defines the approved behavior for `PANIC_MODE`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: QUEUE_RECOVERY
+
+### Purpose
+Defines the approved behavior for `QUEUE_RECOVERY`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
+
+## Action: PRESERVE_EVIDENCE
+
+### Purpose
+Defines the approved behavior for `PRESERVE_EVIDENCE`.
+
+### Allowed Triggers
+- AntiNuke detector decision.
+- FakePerms denial on protected action.
+- Unauthorized bot or webhook detection.
+- Active nuke, raid, spam, or abuse incident.
+- Manual authorized operator action where permitted.
+
+### Authority Requirements
+- Must check Guardian authority before manual execution.
+- Automated execution must trace to detector decision.
+- Owner/trusted exemptions must be evaluated.
+- Raw Discord Administrator is not enough for Guardian trust.
+
+### Execution Rules
+- Execute only through approved punishment orchestrator.
+- Record start, result, and failure state.
+- Avoid duplicate punishment.
+- Respect Discord rate limits without blocking critical containment.
+- Escalate visibly if action cannot complete.
+
+### Failure Handling
+- Log failure reason.
+- Preserve incident state.
+- Escalate to operator if permissions are missing.
+- Do not mark incident as contained unless verified.
+
+### Recovery Interaction
+- Recovery may begin only after containment.
+- Recovery must not blindly restore unsafe state.
+- Recovery jobs must reference incident and action evidence.
+
+### Evidence Produced
+- action_id
+- incident_id
+- guild_id
+- actor_id
+- target_id
+- trigger_detector
+- execution_status
+- error if any
+- final verification state
+
+### Certification Requirements
+- Unit test action planner.
+- Integration test execution path.
+- Failure-path test.
+- Log evidence review.
+- Regression test for dedupe.
+
+---
