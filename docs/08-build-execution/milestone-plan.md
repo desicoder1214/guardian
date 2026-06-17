@@ -1,33 +1,543 @@
 # Guardian Milestone Plan
 
-## Purpose
+## 1. Purpose
 
-Defines the build-execution contract for Guardian Milestone Plan.
+This document defines Guardian's milestone planning model.
 
-## Scope
+Milestones ensure Guardian progresses through documented, reviewable, testable, and certifiable phases instead of uncontrolled implementation.
 
-This document governs how Guardian moves from architecture to implementation, validation, release, and certification.
+---
 
-## Requirements
+## 2. Global Rules
 
-- Work must be milestone-based.
-- Every implementation item must trace to a contract.
-- Every release must have acceptance criteria.
-- Every change must have review evidence.
-- Security kernel changes require special review.
-- Production release requires certification evidence.
-- Known limitations must be documented.
+- Every milestone must have clear scope.
+- Every milestone must have exit criteria.
+- Every milestone must map to documentation and tests.
+- Security milestones must be completed before optional features.
+- A milestone is not complete without evidence.
+- Failed milestones require corrective action.
 
-## Required Evidence
+---
+## Area: Milestone Philosophy
 
-- Commit hash
-- Linked contract
-- Test result
-- Review result
-- Release impact
-- Rollback path
-- Final verdict
+### Purpose
+Defines milestone requirements for `MILESTONE_PHILOSOPHY`.
 
-## Anti-Drift Rule
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
 
-No implementation work may be accepted if it cannot be traced to the documented build execution plan.
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Versioning Strategy
+
+### Purpose
+Defines milestone requirements for `VERSIONING_STRATEGY`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Documentation Milestones
+
+### Purpose
+Defines milestone requirements for `DOCUMENTATION_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Implementation Milestones
+
+### Purpose
+Defines milestone requirements for `IMPLEMENTATION_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Security Kernel Milestones
+
+### Purpose
+Defines milestone requirements for `SECURITY_KERNEL_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Testing Milestones
+
+### Purpose
+Defines milestone requirements for `TESTING_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Certification Milestones
+
+### Purpose
+Defines milestone requirements for `CERTIFICATION_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Release Milestones
+
+### Purpose
+Defines milestone requirements for `RELEASE_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Rollback Milestones
+
+### Purpose
+Defines milestone requirements for `ROLLBACK_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Evidence Milestones
+
+### Purpose
+Defines milestone requirements for `EVIDENCE_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Governance Milestones
+
+### Purpose
+Defines milestone requirements for `GOVERNANCE_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Architecture Milestones
+
+### Purpose
+Defines milestone requirements for `ARCHITECTURE_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Data Model Milestones
+
+### Purpose
+Defines milestone requirements for `DATA_MODEL_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Runbook Milestones
+
+### Purpose
+Defines milestone requirements for `RUNBOOK_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: SaaS Milestones
+
+### Purpose
+Defines milestone requirements for `SAAS_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Dashboard Milestones
+
+### Purpose
+Defines milestone requirements for `DASHBOARD_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Plugin Milestones
+
+### Purpose
+Defines milestone requirements for `PLUGIN_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Risk Milestones
+
+### Purpose
+Defines milestone requirements for `RISK_MILESTONES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Review Gates
+
+### Purpose
+Defines milestone requirements for `REVIEW_GATES`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Area: Exit Criteria
+
+### Purpose
+Defines milestone requirements for `EXIT_CRITERIA`.
+
+### Required Definition
+- Milestone name
+- Scope
+- Owner
+- Dependencies
+- Required evidence
+- Exit criteria
+
+### Review Requirements
+- Documentation review
+- Test readiness review
+- Risk review
+- Certification impact review
+
+### Completion Rules
+- Must satisfy exit criteria.
+- Must have evidence.
+- Must not leave unresolved security blockers.
+
+---
+
+## Exit Rule
+
+No milestone may be considered complete unless scope, implementation evidence, test evidence, and certification impact are documented.
