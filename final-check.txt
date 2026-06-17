@@ -1,0 +1,166 @@
+## main...origin/main
+?? final-check.txt
+* main
+  origin/main
+v0.1-foundation
+v0.6-security-kernel-design
+v1.0-architecture-baseline
+v1.1-data-runbook-foundation
+v1.2-documentation-framework
+v1.3-implementation-readiness
+v1.4-enterprise-data-model
+v1.5-operational-runbooks
+v2.0-implementation-contracts
+v2.1-detector-catalog
+v2.10-logging-forensics-contract
+v2.11-performance-slo-contract
+v2.12-database-migration-contract
+v2.2-punishment-catalog
+v2.3-event-catalog
+v2.4-authority-capability-catalog
+v2.5-module-registry-contract
+v2.6-plugin-sdk-contract
+v2.7-api-contract
+v2.8-configuration-contract
+v2.9-recovery-orchestrator-contract
+v3.0-testing-framework
+v4.0-build-execution-framework
+v5.0-certification-framework
+=== Empty files ===
+0
+=== Line counts ===
+11 docs/README.md
+13 docs/00-governance/north-star.md
+13 docs/09-testing-certification/documentation-quality-gate.md
+15 docs/09-testing-certification/implementation-readiness-checklist.md
+16 docs/00-governance/architecture-decision-records.md
+21 docs/01-architecture/module-boundary-contract.md
+22 docs/00-governance/document-traceability-matrix.md
+41 docs/04-data-model/audit-forensics-model.md
+41 docs/04-data-model/multi-tenant-saas-model.md
+43 docs/04-data-model/entity-relationships.md
+49 docs/04-data-model/snapshot-model.md
+55 docs/04-data-model/authority-model.md
+82 docs/00-governance/scope-boundaries.md
+104 docs/00-governance/executive-principles.md
+118 docs/10-runbooks/active-nuke-response.md
+118 docs/10-runbooks/disaster-recovery.md
+118 docs/10-runbooks/incident-response.md
+118 docs/10-runbooks/live-drill-execution.md
+118 docs/10-runbooks/lockdown-panic-runbook.md
+118 docs/10-runbooks/production-release-certification.md
+118 docs/10-runbooks/recovery-restore-runbook.md
+118 docs/10-runbooks/unauthorized-bot-response.md
+118 docs/10-runbooks/webhook-compromise-response.md
+248 docs/04-data-model/database-schema.md
+319 docs/05-security-kernel/fakeperms-authority.md
+326 docs/05-security-kernel/bot-authorization.md
+326 docs/05-security-kernel/webhook-integration-security.md
+336 docs/09-testing-certification/certification-matrix.md
+337 docs/05-security-kernel/recovery-snapshot.md
+363 docs/05-security-kernel/lockdown-beast-panic.md
+369 docs/03-contracts/anti-drift-feature-ledger.md
+409 docs/02-threat-model/threat-model.md
+417 docs/11-certification/live-drill-certification-checklist.md
+418 docs/11-certification/release-certification-checklist.md
+430 docs/03-contracts/system-contract-register.md
+458 docs/01-architecture/executive-architecture-contract.md
+477 docs/01-architecture/high-level-architecture.md
+488 docs/05-security-kernel/antinuke-core.md
+490 docs/09-testing-certification/live-drill-plan.md
+543 docs/08-build-execution/milestone-plan.md
+596 docs/07-testing/integration-test-contract.md
+596 docs/07-testing/red-team-contract.md
+611 docs/11-certification/forensic-review-standard.md
+620 docs/11-certification/enterprise-readiness-standard.md
+621 docs/08-build-execution/release-plan.md
+625 docs/07-testing/unit-test-contract.md
+646 docs/11-certification/security-certification-standard.md
+647 docs/08-build-execution/implementation-roadmap.md
+648 docs/07-testing/regression-contract.md
+666 docs/07-testing/live-drill-contract.md
+667 docs/08-build-execution/acceptance-criteria.md
+668 docs/08-build-execution/production-readiness-gate.md
+673 docs/08-build-execution/change-management-contract.md
+695 docs/06-implementation/plugin-sdk-contract.md
+735 docs/07-testing/simulator-contract.md
+873 docs/07-testing/performance-test-contract.md
+879 docs/06-implementation/module-registry-contract.md
+933 docs/06-implementation/punishment-catalog.md
+1019 docs/06-implementation/configuration-contract.md
+1068 docs/06-implementation/api-contract.md
+1100 docs/06-implementation/recovery-orchestrator-contract.md
+1228 docs/06-implementation/performance-slo-contract.md
+1401 docs/06-implementation/database-migration-contract.md
+1482 docs/06-implementation/authority-capability-catalog.md
+1579 docs/06-implementation/event-catalog.md
+1682 docs/06-implementation/logging-forensics-contract.md
+2367 docs/06-implementation/detector-catalog.md
+PASSED: all docs contain content
+11 docs/README.md
+13 docs/00-governance/north-star.md
+13 docs/09-testing-certification/documentation-quality-gate.md
+15 docs/09-testing-certification/implementation-readiness-checklist.md
+16 docs/00-governance/architecture-decision-records.md
+21 docs/01-architecture/module-boundary-contract.md
+22 docs/00-governance/document-traceability-matrix.md
+41 docs/04-data-model/audit-forensics-model.md
+41 docs/04-data-model/multi-tenant-saas-model.md
+43 docs/04-data-model/entity-relationships.md
+49 docs/04-data-model/snapshot-model.md
+55 docs/04-data-model/authority-model.md
+82 docs/00-governance/scope-boundaries.md
+104 docs/00-governance/executive-principles.md
+118 docs/10-runbooks/active-nuke-response.md
+118 docs/10-runbooks/disaster-recovery.md
+118 docs/10-runbooks/incident-response.md
+118 docs/10-runbooks/live-drill-execution.md
+118 docs/10-runbooks/lockdown-panic-runbook.md
+118 docs/10-runbooks/production-release-certification.md
+118 docs/10-runbooks/recovery-restore-runbook.md
+118 docs/10-runbooks/unauthorized-bot-response.md
+118 docs/10-runbooks/webhook-compromise-response.md
+248 docs/04-data-model/database-schema.md
+319 docs/05-security-kernel/fakeperms-authority.md
+326 docs/05-security-kernel/bot-authorization.md
+326 docs/05-security-kernel/webhook-integration-security.md
+336 docs/09-testing-certification/certification-matrix.md
+337 docs/05-security-kernel/recovery-snapshot.md
+363 docs/05-security-kernel/lockdown-beast-panic.md
+369 docs/03-contracts/anti-drift-feature-ledger.md
+409 docs/02-threat-model/threat-model.md
+417 docs/11-certification/live-drill-certification-checklist.md
+418 docs/11-certification/release-certification-checklist.md
+430 docs/03-contracts/system-contract-register.md
+458 docs/01-architecture/executive-architecture-contract.md
+477 docs/01-architecture/high-level-architecture.md
+488 docs/05-security-kernel/antinuke-core.md
+490 docs/09-testing-certification/live-drill-plan.md
+543 docs/08-build-execution/milestone-plan.md
+596 docs/07-testing/integration-test-contract.md
+596 docs/07-testing/red-team-contract.md
+611 docs/11-certification/forensic-review-standard.md
+620 docs/11-certification/enterprise-readiness-standard.md
+621 docs/08-build-execution/release-plan.md
+625 docs/07-testing/unit-test-contract.md
+646 docs/11-certification/security-certification-standard.md
+647 docs/08-build-execution/implementation-roadmap.md
+648 docs/07-testing/regression-contract.md
+666 docs/07-testing/live-drill-contract.md
+667 docs/08-build-execution/acceptance-criteria.md
+668 docs/08-build-execution/production-readiness-gate.md
+673 docs/08-build-execution/change-management-contract.md
+695 docs/06-implementation/plugin-sdk-contract.md
+735 docs/07-testing/simulator-contract.md
+873 docs/07-testing/performance-test-contract.md
+879 docs/06-implementation/module-registry-contract.md
+933 docs/06-implementation/punishment-catalog.md
+1019 docs/06-implementation/configuration-contract.md
+1068 docs/06-implementation/api-contract.md
+1100 docs/06-implementation/recovery-orchestrator-contract.md
+1228 docs/06-implementation/performance-slo-contract.md
+1401 docs/06-implementation/database-migration-contract.md
+1482 docs/06-implementation/authority-capability-catalog.md
+1579 docs/06-implementation/event-catalog.md
+1682 docs/06-implementation/logging-forensics-contract.md
+2367 docs/06-implementation/detector-catalog.md
