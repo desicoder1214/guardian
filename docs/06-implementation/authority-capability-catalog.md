@@ -2,75 +2,1481 @@
 
 ## 1. Purpose
 
-Defines FakePerms capabilities, scopes, trust boundaries, and authority requirements.
+This catalog defines every FakePerms capability recognized by Guardian.
 
-This document converts Guardian architecture into implementation-level requirements.
+No module may invent its own permissions or authority model.
 
----
-
-## 2. Scope
-
-This contract applies to Guardian runtime implementation, tests, certification, and future module expansion.
+Authority decisions must be made exclusively through FakePerms.
 
 ---
 
-## 3. Implementation Rules
+## 2. Global Rules
 
-- Must trace to governance, architecture, threat model, and system contracts.
-- Must preserve Security Kernel priority.
-- Must not bypass FakePerms.
-- Must not block AntiNuke hot paths.
-- Must produce forensic evidence where security decisions are made.
-- Must be testable and certifiable.
-
----
-
-## 4. Required Fields
-
-Every implementation artifact must define:
-
-- Name
-- Owner
-- Inputs
-- Outputs
-- Failure behavior
-- Logging requirements
-- Test requirements
-- Certification requirements
-- Anti-drift rule
+- Every capability has a unique identifier.
+- Every capability is explicitly granted.
+- Every capability is auditable.
+- Every capability is revocable.
+- Discord Administrator never implies Guardian authority.
+- Capabilities are evaluated before any privileged action.
+- Owner overrides remain explicitly documented.
 
 ---
 
-## 5. Failure Behavior
+## 3. Capability Levels
 
-Failures must be explicit.
+| Level | Purpose |
+|---|---|
+| L0 | Read-only |
+| L1 | Configuration |
+| L2 | Operational |
+| L3 | Security |
+| L4 | Recovery |
+| L5 | Owner-only |
 
-Security-critical failures must not be silent.
+---
+## Capability: ANTINUKE_VIEW
 
-Dangerous authority failures must fail closed.
+### Purpose
+Authorizes execution of `ANTINUKE_VIEW`.
 
-Recovery and operational failures must fail visibly.
+### Capability Level
+- L0
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
 
 ---
 
-## 6. Testing Requirements
+## Capability: ANTINUKE_CONFIG
 
-Implementation must include:
+### Purpose
+Authorizes execution of `ANTINUKE_CONFIG`.
 
-- Unit tests
-- Integration tests
-- Regression tests
-- Failure-path tests
-- Certification evidence where required
+### Capability Level
+- L1
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
 
 ---
 
-## 7. Certification Requirements
+## Capability: ANTINUKE_BYPASS
 
-This contract is satisfied only when implementation behavior is proven by tests, logs, and drill evidence.
+### Purpose
+Authorizes execution of `ANTINUKE_BYPASS`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
 
 ---
 
-## 8. Anti-Drift Rule
+## Capability: ANTISPAM_VIEW
 
-No implementation may introduce behavior outside this contract without updating the relevant architecture, threat model, data model, testing, and certification documents.
+### Purpose
+Authorizes execution of `ANTISPAM_VIEW`.
+
+### Capability Level
+- L0
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: ANTISPAM_CONFIG
+
+### Purpose
+Authorizes execution of `ANTISPAM_CONFIG`.
+
+### Capability Level
+- L1
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: MOD_WARN
+
+### Purpose
+Authorizes execution of `MOD_WARN`.
+
+### Capability Level
+- L2
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: MOD_TIMEOUT
+
+### Purpose
+Authorizes execution of `MOD_TIMEOUT`.
+
+### Capability Level
+- L2
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: MOD_KICK
+
+### Purpose
+Authorizes execution of `MOD_KICK`.
+
+### Capability Level
+- L2
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: MOD_BAN
+
+### Purpose
+Authorizes execution of `MOD_BAN`.
+
+### Capability Level
+- L2
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: MOD_UNBAN
+
+### Purpose
+Authorizes execution of `MOD_UNBAN`.
+
+### Capability Level
+- L2
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: MOD_PURGE
+
+### Purpose
+Authorizes execution of `MOD_PURGE`.
+
+### Capability Level
+- L2
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: TRUST_VIEW
+
+### Purpose
+Authorizes execution of `TRUST_VIEW`.
+
+### Capability Level
+- L0
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: TRUST_GRANT
+
+### Purpose
+Authorizes execution of `TRUST_GRANT`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: TRUST_REVOKE
+
+### Purpose
+Authorizes execution of `TRUST_REVOKE`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: PERMIT_GRANT
+
+### Purpose
+Authorizes execution of `PERMIT_GRANT`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: PERMIT_REVOKE
+
+### Purpose
+Authorizes execution of `PERMIT_REVOKE`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: BOT_AUTHORIZE
+
+### Purpose
+Authorizes execution of `BOT_AUTHORIZE`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: BOT_REVOKE
+
+### Purpose
+Authorizes execution of `BOT_REVOKE`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: WEBHOOK_PROTECT
+
+### Purpose
+Authorizes execution of `WEBHOOK_PROTECT`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: WEBHOOK_FREEZE
+
+### Purpose
+Authorizes execution of `WEBHOOK_FREEZE`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: LOCKDOWN_EXECUTE
+
+### Purpose
+Authorizes execution of `LOCKDOWN_EXECUTE`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: LOCKDOWN_RELEASE
+
+### Purpose
+Authorizes execution of `LOCKDOWN_RELEASE`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: PANIC_EXECUTE
+
+### Purpose
+Authorizes execution of `PANIC_EXECUTE`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: PANIC_RELEASE
+
+### Purpose
+Authorizes execution of `PANIC_RELEASE`.
+
+### Capability Level
+- L3
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: RECOVERY_EXECUTE
+
+### Purpose
+Authorizes execution of `RECOVERY_EXECUTE`.
+
+### Capability Level
+- L4
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: RECOVERY_APPROVE
+
+### Purpose
+Authorizes execution of `RECOVERY_APPROVE`.
+
+### Capability Level
+- L4
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: RECOVERY_CANCEL
+
+### Purpose
+Authorizes execution of `RECOVERY_CANCEL`.
+
+### Capability Level
+- L4
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: SNAPSHOT_CREATE
+
+### Purpose
+Authorizes execution of `SNAPSHOT_CREATE`.
+
+### Capability Level
+- L2
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: SNAPSHOT_RESTORE
+
+### Purpose
+Authorizes execution of `SNAPSHOT_RESTORE`.
+
+### Capability Level
+- L4
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: LOG_VIEW
+
+### Purpose
+Authorizes execution of `LOG_VIEW`.
+
+### Capability Level
+- L0
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: FORENSICS_VIEW
+
+### Purpose
+Authorizes execution of `FORENSICS_VIEW`.
+
+### Capability Level
+- L0
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: CERTIFICATION_REVIEW
+
+### Purpose
+Authorizes execution of `CERTIFICATION_REVIEW`.
+
+### Capability Level
+- L0
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: CERTIFICATION_APPROVE
+
+### Purpose
+Authorizes execution of `CERTIFICATION_APPROVE`.
+
+### Capability Level
+- L4
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: DASHBOARD_VIEW
+
+### Purpose
+Authorizes execution of `DASHBOARD_VIEW`.
+
+### Capability Level
+- L0
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: DASHBOARD_CONFIG
+
+### Purpose
+Authorizes execution of `DASHBOARD_CONFIG`.
+
+### Capability Level
+- L1
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: GUILD_CONFIG
+
+### Purpose
+Authorizes execution of `GUILD_CONFIG`.
+
+### Capability Level
+- L1
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: PLUGIN_INSTALL
+
+### Purpose
+Authorizes execution of `PLUGIN_INSTALL`.
+
+### Capability Level
+- L2
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: PLUGIN_REMOVE
+
+### Purpose
+Authorizes execution of `PLUGIN_REMOVE`.
+
+### Capability Level
+- L2
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: PLUGIN_CONFIG
+
+### Purpose
+Authorizes execution of `PLUGIN_CONFIG`.
+
+### Capability Level
+- L1
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: AI_CONFIG
+
+### Purpose
+Authorizes execution of `AI_CONFIG`.
+
+### Capability Level
+- L1
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Capability: OWNER_OVERRIDE
+
+### Purpose
+Authorizes execution of `OWNER_OVERRIDE`.
+
+### Capability Level
+- L5
+
+### Required Authority Checks
+- Subject must be trusted.
+- Capability must be explicitly granted.
+- Scope must include current guild.
+- Grant must not be revoked.
+
+### Audit Requirements
+- Actor ID
+- Guild ID
+- Capability
+- Decision
+- Timestamp
+- Correlation ID
+
+### Failure Behaviour
+- Deny action
+- Record audit evidence
+- Return authorization failure
+
+### Certification Requirements
+- Grant test
+- Revoke test
+- Scope validation test
+- Audit verification
+
+---
+
+## Anti-Drift Rule
+
+No implementation may introduce a new capability without updating:
+
+- FakePerms Authority
+- System Contract Register
+- Threat Model
+- Detector Catalog (if applicable)
+- Punishment Catalog (if applicable)
+- Certification Matrix
+- Live Drill Plan
