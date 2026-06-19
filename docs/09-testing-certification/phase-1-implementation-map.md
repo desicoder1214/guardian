@@ -54,6 +54,9 @@ Phase 1 must not include runtime or product implementation.
 
 | File path | Purpose | Implementation impact | Risk if ignored |
 |---|---|---|---|
+| `docs/00-governance/GOVERNANCE_HIERARCHY.md` | Defines document precedence and governance order of operations | Prevents implementation maps from overriding contracts or authorization files | Agents may follow lower-level planning artifacts instead of authoritative governance |
+| `docs/00-governance/SOURCE_OF_TRUTH_MATRIX.md` | Defines the authoritative owner for each decision area | Ensures Phase 1 planning references, but does not redefine, security behavior | Conflicting documents may create unsafe or ambiguous implementation behavior |
+| `docs/00-governance/PROJECT_LIFECYCLE.md` | Defines lifecycle stages and required gates before implementation | Confirms implementation-map approval remains planning-only until authorization | Coding may begin before architecture freeze, contract approval, or milestone authorization |
 | `IMPLEMENTATION_MANIFEST.md` | Defines current milestone scope, gate status, and authorized work | Must anchor Phase 1 boundaries and prevent unauthorized implementation | Implementation may drift into prohibited runtime work |
 | `.governance/IMPLEMENTATION_GATE.md` | Defines closed/open gate and required token | Governs whether any implementation may begin | Implementation may proceed without proper authorization |
 | `.governance/MILESTONE_AUTHORIZATION.md` | Records milestone authorization state | Confirms whether map-only output is permitted | Implementation may be started prematurely |
@@ -76,6 +79,7 @@ Phase 1 must not include runtime or product implementation.
 | `docs/07-testing/unit-test-contract.md` | Defines unit test requirements for security-critical modules | Guides test coverage and determinism requirements | Implementation may lack required test evidence |
 | `docs/08-build-execution/implementation-roadmap.md` | Defines roadmap philosophy and phase rules | Confirms Phase 1 is architecture-first and within approved scope | Implementation may violate roadmap sequencing |
 | `.governance/AGENT_EXECUTION_PROTOCOL.md` | Defines what Codex may do while gate is closed | Confirms no file creation or code generation until token present | Agent may mistakenly produce unauthorized implementation |
+| `IMPLEMENTATION_CONTRACT.md` | Defines the exact milestone-authorized deliverables and prohibited work | Anchors Phase 1 authorized implementation scope and quality requirements | Implementation may proceed without proper contract-level approval |
 
 ## 4. Phase 1 Security Kernel Map
 
@@ -219,9 +223,20 @@ src/
 
 ## 7. Validation Gates Before Code
 
+Before any implementation may begin, Guardian must satisfy the governance hierarchy, source-of-truth ownership, and lifecycle gates defined in `docs/00-governance/`.
+
+Required governance gates:
+
+- Governance hierarchy approved and conflict-free.
+- Source-of-truth matrix approved and complete for Phase 1 scope.
+- Project lifecycle stage explicitly moved from planning to implementation authorization.
+- No implementation map entry conflicts with a higher-precedence contract.
+- No planning artifact is treated as implementation authorization.
+
+
 - Confirm the implementation gate is opened by updating `.governance/MILESTONE_AUTHORIZATION.md` and `IMPLEMENTATION_MANIFEST.md` with the required token.
 - Confirm architecture review approval for this implementation map.
-- Confirm implementation contract table approval and traceability plan.
+- Confirm Implementation Contract approval and implementation contract table approval.
 - Confirm that `IMPLEMENTATION_TRACEABILITY.md` exists and is ready to capture Phase 1 artifacts.
 - Confirm that Phase 1 scope remains limited to foundational kernel contracts and shared infrastructure.
 - Confirm no documentation freeze violation; any contract gap documentation must be approved.
