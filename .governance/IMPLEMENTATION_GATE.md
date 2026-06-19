@@ -1,123 +1,25 @@
 # Guardian Implementation Gate
 
-**Version:** 1.0.0  
 **Status:** Active  
-**Owner:** Guardian Architecture Authority  
-**Applies To:** All implementation agents (Codex, GPT, Claude, human contributors)
+**Purpose:** Defines the gate that controls when implementation may start.
 
 ---
 
-# Purpose
+## Authorization Source of Truth
 
-The Implementation Gate defines the mandatory authorization requirements that must be satisfied before any implementation work begins.
+The current implementation gate state is determined exclusively by:
 
-Its purpose is to prevent:
+```text
+.governance/MILESTONE_AUTHORIZATION.md
+```
 
-- unauthorized implementation
-- architectural drift
-- scope expansion
-- premature code generation
-- undocumented repository modifications
-
-This document governs **when implementation may begin**.
-
-It does **not** govern architecture.
-
-Architecture is governed by the repository documentation.
+This file defines gate rules. It does not independently authorize implementation.
 
 ---
 
-# Repository Authority
+## Gate Open Condition
 
-Implementation shall follow the repository in the following order of precedence:
-
-1. Repository contracts (`docs/`)
-2. Repository governance (`.governance/`)
-3. Current implementation state (`IMPLEMENTATION_MANIFEST.md`)
-4. Current milestone authorization
-5. Human approval
-
-If any conflict exists, implementation shall stop until resolved.
-
----
-
-# Current Gate Status
-
-The implementation gate has only two states.
-
-## CLOSED
-
-Implementation is prohibited.
-
-Allowed activities:
-
-- repository analysis
-- documentation review
-- architecture review
-- implementation planning
-- implementation map generation
-- implementation contract generation
-- risk analysis
-- repository reporting
-
-Prohibited activities:
-
-- create files
-- modify files
-- delete files
-- generate source code
-- generate repository patches
-- execute build commands
-- execute tests
-- commit
-- push
-
----
-
-## OPEN
-
-Implementation is permitted only after all authorization requirements have been satisfied.
-
----
-
-# Opening the Gate
-
-The implementation gate may only be opened when **all** of the following are true.
-
-## Repository Review
-
-Completed.
-
-## Governance Review
-
-Completed.
-
-## Architecture Review
-
-Approved.
-
-## Implementation Map
-
-Approved.
-
-## Implementation Contract
-
-Approved.
-
-## Milestone Authorization
-
-Approved.
-
-## Authorization Token
-
-Present.
-
----
-
-# Required Authorization Token
-
-Implementation may begin only when the following token exists inside
-`.governance/MILESTONE_AUTHORIZATION.md`.
+The implementation gate is open only when `.governance/MILESTONE_AUTHORIZATION.md` contains:
 
 ```text
 STATE: IMPLEMENTATION_AUTHORIZED
@@ -126,159 +28,60 @@ TOKEN:
 PHASE1_IMPLEMENTATION_APPROVED
 ```
 
-No implied approval is valid.
-
-Natural language approval is not valid.
-
-Only the authorization token opens the implementation gate.
-
 ---
 
-# Responsibilities
+## Gate Closed Behavior
 
-## ChatGPT
-
-Responsible for:
-
-- architecture
-- contracts
-- governance
-- review
-- certification
-
-ChatGPT does not authorize implementation automatically.
-
----
-
-## Codex
-
-Responsible for:
-
-- implementation
-- testing
-- validation
-
-Codex shall never:
-
-- redesign architecture
-- infer approval
-- expand milestone scope
-- commit automatically
-- push automatically
-
----
-
-## Human Maintainer
-
-Responsible for:
-
-- implementation approval
-- commit approval
-- merge approval
-- release approval
-
----
-
-# Allowed Output While Closed
-
-When the gate is closed, implementation agents may produce only:
+When the required token is absent, Codex may only produce:
 
 - repository analysis
 - implementation map
 - implementation contract table
-- architecture review
-- repository report
-- validation report
-- risk report
+- risk list
+- validation plan
+- status report
 
-No repository modification is permitted.
+Codex must not create runtime or source files.
 
 ---
 
-# Prohibited Actions
+## Gate Open Behavior
 
-While the gate is closed the implementation agent shall never:
+When the required token is present, Codex may implement only the explicitly authorized milestone scope.
 
-- create files
-- modify files
-- delete files
-- rename files
-- generate patches
-- apply patches
-- execute build commands
-- execute validation
+For the current milestone, this means **Phase 1A — Project Foundation Implementation only**.
+
+---
+
+## Prohibited Actions Unless Separately Approved
+
+Even when implementation is authorized, Codex must not:
+
 - commit
 - push
 - merge
+- release
+- deploy
+- implement out-of-scope features
+- introduce Discord runtime unless authorized by a later milestone
+- introduce database persistence unless authorized by a later milestone
 
 ---
 
-# Failure Conditions
+## Failure Handling
 
-The implementation gate is considered violated if an implementation agent:
+If Codex performs unauthorized work:
 
-- generates source code
-- creates repository files
-- modifies repository files
-- generates a repository patch
-- commits changes
-- pushes changes
-- expands milestone scope
-- modifies frozen documentation
+1. stop immediately
+2. report the governance violation
+3. list modified files
+4. do not continue
+5. wait for human instruction
 
 ---
 
-# Failure Response
+## Final Rule
 
-If a violation occurs the implementation agent shall:
+No approval may be inferred.
 
-1. Stop immediately.
-2. Report the violation.
-3. Report modified files.
-4. Report whether a patch exists.
-5. Wait for further instruction.
-
----
-
-# Closing the Gate
-
-The implementation gate automatically closes after:
-
-- implementation completion
-- validation
-- architecture review
-
-The next phase requires a new authorization.
-
-Implementation authorization never carries over to another milestone.
-
----
-
-# Relationship to Other Governance Documents
-
-This document shall be read together with:
-
-- IMPLEMENTATION_MANIFEST.md
-- AGENT_EXECUTION_PROTOCOL.md
-- MILESTONE_AUTHORIZATION.md
-- REVIEW_WORKFLOW.md
-- ARCHITECT_REVIEW_CHECKLIST.md
-- PHASE_COMPLETION_TEMPLATE.md
-
----
-
-# Final Rule
-
-When uncertain:
-
-STOP.
-
-Do not infer approval.
-
-Do not infer authorization.
-
-Do not generate code.
-
-Do not modify the repository.
-
-Wait for explicit human instruction.
+Every state transition requires explicit authorization.

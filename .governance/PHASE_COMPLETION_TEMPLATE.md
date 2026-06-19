@@ -1,259 +1,93 @@
 # Guardian Phase Completion Template
 
-**Version:** 1.0.0
-**Status:** Active
-**Owner:** Guardian Architecture Authority
+**Status:** Active  
+**Purpose:** Template required at the end of every implementation phase.
 
 ---
 
-# Purpose
+# Phase Completion Report
 
-This template defines the mandatory report that must be produced at the completion of every implementation phase.
+## 1. Phase Information
 
-No implementation phase shall be considered complete until this report has been generated, reviewed, and approved.
-
----
-
-# Phase Information
-
-| Field                 | Value |
-| --------------------- | ----- |
-| Milestone             |       |
-| Phase                 |       |
-| Date                  |       |
-| Implementation Agent  |       |
-| Architecture Reviewer |       |
-| Repository Revision   |       |
+| Field | Value |
+|---|---|
+| Milestone | |
+| Phase | |
+| Implementation Agent | |
+| Reviewer | |
+| Date | |
 
 ---
 
-# Phase Objective
+## 2. Scope Delivered
 
-Describe the approved objective of the implementation phase.
-
----
-
-# Approved Scope
-
-List the approved work for this phase.
-
-* [ ]
-* [ ]
-* [ ]
-* [ ]
+List completed scope.
 
 ---
 
-# Delivered Scope
+## 3. Files Created
 
-Describe what was actually implemented.
-
----
-
-# Files Created
-
-| File | Purpose | Repository Contract |
-| ---- | ------- | ------------------- |
+| File | Purpose | Contract |
+|---|---|---|
 
 ---
 
-# Files Modified
+## 4. Files Modified
 
-| File | Reason | Repository Contract |
-| ---- | ------ | ------------------- |
-
----
-
-# Files Deleted
-
-| File | Reason |
-| ---- | ------ |
-
-If none:
-
-```text id="cw6mb3"
-None
-```
+| File | Purpose | Contract |
+|---|---|---|
 
 ---
 
-# Repository Contract Traceability
+## 5. Tests Added
 
-For every implementation artifact identify:
-
-| File | Repository Document | Contract | Milestone |
-| ---- | ------------------- | -------- | --------- |
+| Test File | Purpose | Status |
+|---|---|---|
 
 ---
 
-# Validation
+## 6. Validation Results
 
-The following validation shall be executed.
+| Command | Result | Evidence |
+|---|---|---|
+| `npm install` | | |
+| `npm run lint` | | |
+| `npm run format:check` | | |
+| `npm run typecheck` | | |
+| `npm run build` | | |
+| `npm test` | | |
 
-| Command                | Result | Status |
-| ---------------------- | ------ | ------ |
-| `npm run lint`         |        |        |
-| `npm run format:check` |        |        |
-| `npm run typecheck`    |        |        |
-| `npm run build`        |        |        |
-| `npm test`             |        |        |
-
-If a command could not execute:
-
-Status:
-
-```text id="trwz3m"
-NOT VERIFIED
-```
-
-Reason:
-
-Document why execution was not possible.
-
-No validation result may be fabricated.
+If a command was not executed, mark `NOT VERIFIED`.
 
 ---
 
-# Tests Added
+## 7. Traceability
 
-| Test | Purpose | Status |
-| ---- | ------- | ------ |
-
----
-
-# Architecture Verification
-
-Confirm:
-
-* [ ] Repository contracts followed.
-* [ ] Milestone scope preserved.
-* [ ] No architectural redesign.
-* [ ] Security Kernel boundaries maintained.
-* [ ] Event Bus remains framework independent.
-* [ ] Authority Engine remains contract driven.
-* [ ] FakePerms remains deny-by-default.
-* [ ] Policy Engine contains no enforcement logic.
-* [ ] Optional modules do not affect Security Kernel.
+- [ ] `IMPLEMENTATION_TRACEABILITY.md` updated
+- [ ] every created file listed
+- [ ] every modified file listed
+- [ ] contract references included
 
 ---
 
-# Governance Verification
+## 8. Git Evidence
 
-Confirm:
-
-* [ ] AGENT_EXECUTION_PROTOCOL followed.
-* [ ] IMPLEMENTATION_GATE followed.
-* [ ] REVIEW_WORKFLOW followed.
-* [ ] ARCHITECT_REVIEW_CHECKLIST completed.
-* [ ] IMPLEMENTATION_MANIFEST updated.
-* [ ] IMPLEMENTATION_TRACEABILITY updated.
-
----
-
-# Git Verification
-
-Provide evidence from:
-
-```bash id="exlxdd"
+```bash
 git status
-
 git diff
 ```
 
-Verify:
+---
 
-* [ ] Only approved files changed.
-* [ ] No frozen documentation modified.
-* [ ] No unrelated files modified.
+## 9. Risks and Limitations
+
+List remaining risks and known limitations.
 
 ---
 
-# Risks
+## 10. Approval Request
 
-Document any remaining risks.
-
-| Risk | Severity | Mitigation |
-| ---- | -------- | ---------- |
-
----
-
-# Known Limitations
-
-Document limitations that remain after this phase.
-
----
-
-# Deferred Work
-
-List work intentionally deferred to future milestones.
-
-| Item | Reason | Target Milestone |
-| ---- | ------ | ---------------- |
-
----
-
-# Outstanding Issues
-
-List unresolved issues discovered during implementation.
-
----
-
-# Lessons Learned
-
-Document implementation observations that may improve future phases.
-
----
-
-# Next Phase Recommendation
-
-Recommended next milestone:
-
-Reason:
-
-Prerequisites:
-
----
-
-# Approval Request
-
-Select one:
-
-* [ ] APPROVED
-* [ ] APPROVED WITH CONDITIONS
-* [ ] REJECTED
-* [ ] NOT VERIFIED
-
----
-
-# Reviewer Notes
-
-Architecture Reviewer:
-
-Date:
-
-Comments:
-
----
-
-# Final Certification
-
-The reviewer certifies that:
-
-* repository contracts were followed;
-* implementation remained within approved scope;
-* validation evidence has been reviewed;
-* governance requirements were satisfied;
-* implementation is ready for the next milestone **or** the required corrective actions have been documented.
-
----
-
-# Final Principle
-
-Completion of implementation **does not** authorize:
-
-* the next implementation phase;
-* repository commits beyond the approved scope;
-* production readiness;
-* release certification.
-
-Each subsequent phase requires a new architecture review, implementation authorization, validation cycle, and approval.
+- [ ] APPROVED
+- [ ] APPROVED WITH CONDITIONS
+- [ ] REJECTED
+- [ ] NOT VERIFIED

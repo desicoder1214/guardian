@@ -2,13 +2,11 @@
 
 ## 1. Governance Status
 
-- Current implementation gate status: CLOSED
-- Current implementation state: `IMPLEMENTATION_NOT_AUTHORIZED`
-- Milestone authorization: not authorized for implementation
-- Code generation authorized: NO
-- Required authorization token before implementation:
-  - `STATE: IMPLEMENTATION_AUTHORIZED`
-  - `TOKEN: PHASE1_IMPLEMENTATION_APPROVED`
+- Implementation authorization source of truth: `.governance/MILESTONE_AUTHORIZATION.md`
+- Current implementation state must be read from `.governance/MILESTONE_AUTHORIZATION.md` only.
+- If the milestone authorization file contains `STATE: IMPLEMENTATION_AUTHORIZED` and `TOKEN: PHASE1_IMPLEMENTATION_APPROVED`, Phase 1A implementation may proceed within the approved scope.
+- This implementation map is a planning and traceability artifact. It does not independently authorize implementation.
+- Code generation remains limited to the scope authorized by `IMPLEMENTATION_CONTRACT.md` and `.governance/MILESTONE_AUTHORIZATION.md`.
 
 ## 2. Repository Scope Summary
 
@@ -217,8 +215,8 @@ src/
 | `docs/06-implementation/recovery-orchestrator-contract.md` | Snapshot data model and recovery job contract | Snapshot validation tests | Planned |
 | `docs/06-implementation/module-registry-contract.md` | Module registry and kernel boundary contract | Module isolation tests | Planned |
 | `docs/07-testing/unit-test-contract.md` | Unit testing strategy for kernel modules | Unit test coverage | Planned |
-| `.governance/IMPLEMENTATION_GATE.md` | Authorization gate and token requirement | Governance compliance review | Not authorized |
-| `.governance/MILESTONE_AUTHORIZATION.md` | Milestone authorization state | Authorization review | Not authorized |
+| `.governance/IMPLEMENTATION_GATE.md` | Authorization gate and token requirement | Governance compliance review | Governed by milestone authorization |
+| `.governance/MILESTONE_AUTHORIZATION.md` | Milestone authorization state | Authorization review | Source of truth |
 | `docs/00-governance/scope-boundaries.md` | Kernel priority and out-of-scope enforcement | Scope validation | Planned |
 
 ## 7. Validation Gates Before Code
@@ -234,7 +232,7 @@ Required governance gates:
 - No planning artifact is treated as implementation authorization.
 
 
-- Confirm the implementation gate is opened by updating `.governance/MILESTONE_AUTHORIZATION.md` and `IMPLEMENTATION_MANIFEST.md` with the required token.
+- Confirm the implementation gate is opened by `.governance/MILESTONE_AUTHORIZATION.md` containing the required state and token. `IMPLEMENTATION_MANIFEST.md` must not duplicate authorization state.
 - Confirm architecture review approval for this implementation map.
 - Confirm Implementation Contract approval and implementation contract table approval.
 - Confirm that `IMPLEMENTATION_TRACEABILITY.md` exists and is ready to capture Phase 1 artifacts.
@@ -245,7 +243,7 @@ Required governance gates:
 
 ## 8. Risks and Open Questions
 
-- Risk: The repository is currently locked by the implementation gate and milestone authorization. No implementation may begin.
+- Risk: Authorization state can drift if multiple documents duplicate it. Mitigation: `.governance/MILESTONE_AUTHORIZATION.md` is the single source of truth.
 - Risk: There is no explicit Phase 1 technical architecture document beyond the general high-level architecture and roadmap guidance.
 - Risk: The required `IMPLEMENTATION_TRACEABILITY.md` artifact is referenced by governance but is not visible in the current repo tree.
 - Risk: Documentation freeze means any new documentation updates must be approved before being promoted to contracts.
@@ -258,6 +256,6 @@ Required governance gates:
 
 Repository analysis: COMPLETE
 Implementation map: COMPLETE
-Implementation authorized: NO
+Implementation authorized: GOVERNED BY `.governance/MILESTONE_AUTHORIZATION.md`
 Code generated: NO
-Next required action: HUMAN REVIEW AND IMPLEMENTATION AUTHORIZATION
+Next required action: IF AUTHORIZED, BEGIN PHASE 1A IMPLEMENTATION ONLY

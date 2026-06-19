@@ -1,391 +1,76 @@
 # Guardian Review Workflow
 
-**Version:** 1.0.0
-**Status:** Active
-**Owner:** Guardian Architecture Authority
+**Status:** Active  
+**Purpose:** Defines the required review workflow for Guardian implementation.
 
 ---
 
-# Purpose
-
-This document defines the mandatory review workflow for all Guardian implementation activities.
-
-Its purpose is to ensure implementation follows the approved repository contracts, governance model, and milestone boundaries.
-
-No implementation may bypass this workflow.
-
----
-
-# Workflow Principles
-
-Guardian follows a contract-driven, architecture-first implementation process.
-
-The workflow separates:
-
-* Architecture
-* Planning
-* Authorization
-* Implementation
-* Validation
-* Review
-* Git Operations
-
-Each stage requires explicit completion before proceeding.
-
----
-
-# Standard Workflow
+## Workflow
 
 ```text
 Repository Review
-        │
-        ▼
+↓
 Governance Review
-        │
-        ▼
-Repository Analysis
-        │
-        ▼
-Implementation Planning
-        │
-        ▼
-Implementation Map
-        │
-        ▼
-Implementation Contract Table
-        │
-        ▼
-Architecture Review
-        │
-        ▼
-Implementation Authorization
-        │
-        ▼
-Patch Generation
-        │
-        ▼
-Patch Review
-        │
-        ▼
-Patch Application
-        │
-        ▼
+↓
+Implementation Contract Review
+↓
+Milestone Authorization Check
+↓
+Implementation
+↓
 Validation
-        │
-        ▼
+↓
 Phase Completion Report
-        │
-        ▼
+↓
 git status
-        │
-        ▼
+↓
 git diff
-        │
-        ▼
+↓
 Independent Architecture Review
-        │
-        ▼
-Commit Approval
-        │
-        ▼
+↓
+Human Commit Approval
+↓
 Commit
-        │
-        ▼
+↓
+Human Push Approval
+↓
 Push
-        │
-        ▼
-Next Milestone
 ```
 
 ---
 
-# Stage 1 — Repository Review
+## Authorization Rule
 
-The implementation agent shall read:
-
-* README.md
-* IMPLEMENTATION_MANIFEST.md
-* `.governance/`
-* `docs/`
-
-Required output:
-
-* Repository summary
-* Current milestone
-* Active governance version
-* Current authorization state
-* Current implementation state
-
-No repository changes are permitted.
+Implementation may begin only when `.governance/MILESTONE_AUTHORIZATION.md` contains the required state and token.
 
 ---
 
-# Stage 2 — Governance Review
+## Validation Rule
 
-The implementation agent shall verify:
-
-* execution protocol
-* implementation gate
-* milestone authorization
-* review workflow
-* architect checklist
-* phase completion template
-
-If governance documents conflict:
-
-STOP.
-
-Report the conflict.
+After implementation, Codex must run the required validation commands or mark them `NOT VERIFIED` with reasons.
 
 ---
 
-# Stage 3 — Repository Analysis
+## Commit Rule
 
-Required deliverables:
-
-* repository inventory
-* contracts discovered
-* implementation readiness
-* implementation risks
-* contract traceability strategy
+Codex must not commit without explicit human approval.
 
 ---
 
-# Stage 4 — Implementation Planning
+## Push Rule
 
-Deliverables:
-
-* implementation scope
-* implementation phases
-* build order
-* dependency graph
-* validation strategy
-
-No files may be created.
+Codex must not push without explicit human approval.
 
 ---
 
-# Stage 5 — Implementation Map
+## Failure Handling
 
-Deliverables:
-
-* folder tree
-* file tree
-* module boundaries
-* dependency relationships
-
-No implementation is permitted.
+If any workflow stage is skipped, Codex must stop and report the skipped stage.
 
 ---
 
-# Stage 6 — Implementation Contract Table
+## Final Rule
 
-For every planned file provide:
+Implementation approval does not equal commit approval.
 
-* file path
-* purpose
-* repository document
-* governing contract
-* dependencies
-* planned tests
-* validation strategy
-
-Wait for approval.
-
----
-
-# Stage 7 — Architecture Review
-
-Architecture reviewer verifies:
-
-* repository alignment
-* milestone alignment
-* contract alignment
-* implementation boundaries
-* traceability
-* risks
-
-Possible outcomes:
-
-* APPROVED
-* APPROVED WITH CONDITIONS
-* REJECTED
-* NOT VERIFIED
-
-Architecture approval alone does not authorize implementation.
-
----
-
-# Stage 8 — Implementation Authorization
-
-Implementation begins only when:
-
-* milestone is authorized
-* implementation gate is open
-* authorization token exists
-
-Required token:
-
-```text
-STATE: IMPLEMENTATION_AUTHORIZED
-
-TOKEN:
-PHASE1_IMPLEMENTATION_APPROVED
-```
-
-Without the token:
-
-STOP.
-
----
-
-# Stage 9 — Patch Generation
-
-Permitted activities:
-
-* source code generation
-* test generation
-* implementation patch generation
-
-Not permitted:
-
-* automatic patch application
-* automatic commit
-* automatic push
-
----
-
-# Stage 10 — Patch Review
-
-Reviewer verifies:
-
-* scope
-* contracts
-* dependencies
-* code organization
-* architectural consistency
-
-Only approved patches may be applied.
-
----
-
-# Stage 11 — Validation
-
-Execute:
-
-```bash
-npm run lint
-npm run format:check
-npm run typecheck
-npm run build
-npm test
-```
-
-If execution is impossible:
-
-Mark:
-
-```text
-NOT VERIFIED
-```
-
-Explain why.
-
-Never fabricate validation.
-
----
-
-# Stage 12 — Phase Completion Report
-
-Generate the Phase Completion Report.
-
-Include:
-
-* completed scope
-* files created
-* files modified
-* contracts satisfied
-* tests
-* validation
-* risks
-* deferred work
-
----
-
-# Stage 13 — Git Review
-
-Provide:
-
-```bash
-git status
-
-git diff
-```
-
-Reviewer confirms:
-
-* expected files only
-* no unrelated changes
-* no frozen documentation modified
-* traceability updated
-
----
-
-# Stage 14 — Commit Approval
-
-Commit requires explicit human approval.
-
-Architecture approval is insufficient.
-
-Implementation approval is insufficient.
-
-Validation completion is insufficient.
-
----
-
-# Stage 15 — Push Approval
-
-Push requires explicit human approval.
-
-Codex shall never infer push authorization.
-
----
-
-# Failure Handling
-
-If any stage is skipped:
-
-1. Stop.
-2. Report the skipped stage.
-3. Report repository status.
-4. Report modified files.
-5. Wait for instruction.
-
----
-
-# Repository Rules
-
-Implementation shall never:
-
-* redesign architecture
-* expand milestone scope
-* modify frozen documentation
-* bypass contracts
-* bypass governance
-* bypass review
-
----
-
-# Final Rule
-
-Every implementation phase shall begin at Repository Review.
-
-Every implementation phase shall end at Push.
-
-No stage may be skipped.
-
-No approval may be inferred.
-
-When uncertain:
-
-STOP.
+Commit approval does not equal push approval.
