@@ -15,7 +15,7 @@ const TestServiceId: ServiceIdentifier<TestService> = { name: 'TestService' };
 
 test('ServiceContainer resolves registered services', () => {
   const container = new ServiceContainer();
-  container.register(TestServiceId, new TestServiceFactory());
+  container.registerSingleton(TestServiceId, new TestServiceFactory());
 
   const service = container.resolve(TestServiceId);
 
@@ -24,7 +24,7 @@ test('ServiceContainer resolves registered services', () => {
 
 test('ServiceContainer returns the same instance for repeated resolutions', () => {
   const container = new ServiceContainer();
-  container.register(TestServiceId, new TestServiceFactory());
+  container.registerSingleton(TestServiceId, new TestServiceFactory());
 
   const first = container.resolve(TestServiceId);
   const second = container.resolve(TestServiceId);
@@ -34,9 +34,9 @@ test('ServiceContainer returns the same instance for repeated resolutions', () =
 
 test('ServiceContainer rejects duplicate registrations', () => {
   const container = new ServiceContainer();
-  container.register(TestServiceId, new TestServiceFactory());
+  container.registerSingleton(TestServiceId, new TestServiceFactory());
 
-  expect(() => container.register(TestServiceId, new TestServiceFactory())).toThrow(
+  expect(() => container.registerSingleton(TestServiceId, new TestServiceFactory())).toThrow(
     ServiceResolutionError,
   );
 });

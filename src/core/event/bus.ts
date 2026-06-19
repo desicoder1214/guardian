@@ -11,6 +11,8 @@ export interface EventBus {
   subscribe(handler: EventHandler): EventSubscription;
 }
 
+export type { KernelEvent } from './types';
+
 export class InMemoryEventBus implements EventBus {
   private readonly handlers: EventHandler[] = [];
 
