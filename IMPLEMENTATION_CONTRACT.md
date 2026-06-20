@@ -2,17 +2,19 @@
 
 **Project:** Guardian  
 **Repository:** https://github.com/desicoder1214/guardian  
-**Version:** 1.0.0  
+**Version:** 4.0.0  
 **Status:** Active  
-**Owner:** Guardian Architecture Authority
+**Owner:** Guardian Architecture Authority  
+**Current Milestone:** v0.2.0-phase1D-discord-event-pipeline  
+**Current Milestone ID:** PHASE_1D_DISCORD_EVENT_PIPELINE
 
 ---
 
 # Purpose
 
-The Implementation Contract is the final implementation scope contract for a milestone.
+The Implementation Contract is the active execution contract for the current milestone.
 
-It translates the approved architecture and implementation planning into an explicit execution contract for implementation agents.
+It translates the approved architecture and milestone authorization into explicit implementation boundaries for implementation agents.
 
 This document does **not** define architecture.
 
@@ -20,13 +22,17 @@ This document does **not** replace repository contracts.
 
 This document does **not** independently authorize implementation.
 
-Implementation authorization is governed exclusively by `.governance/MILESTONE_AUTHORIZATION.md`.
+Implementation authorization is governed exclusively by:
+
+```text
+.governance/MILESTONE_AUTHORIZATION.md
+```
 
 ---
 
 # Relationship to Repository Governance
 
-Implementation shall follow the repository in the following order of precedence:
+Implementation shall follow repository authority in the following order of precedence:
 
 1. Repository Contracts (`docs/`)
 2. Repository Governance (`.governance/`)
@@ -36,7 +42,13 @@ Implementation shall follow the repository in the following order of precedence:
 6. This Implementation Contract
 7. Human Approval
 
-If any conflict exists, implementation shall stop until resolved.
+If any conflict exists:
+
+**STOP**
+
+Do not infer intent.
+
+Await clarification.
 
 ---
 
@@ -44,79 +56,214 @@ If any conflict exists, implementation shall stop until resolved.
 
 ```text
 Milestone:
-v0.2.0-security-kernel-foundation
+v0.2.0-phase1D-discord-event-pipeline
+
+Milestone ID:
+PHASE_1D_DISCORD_EVENT_PIPELINE
 ```
 
 ---
 
 # Implementation Authorization
 
-This document defines authorized scope only.
+This document defines implementation scope only.
 
 Implementation may begin only when `.governance/MILESTONE_AUTHORIZATION.md` contains:
 
 ```text
-STATE: IMPLEMENTATION_AUTHORIZED
+STATE:
+IMPLEMENTATION_AUTHORIZED
 
 TOKEN:
-PHASE1_IMPLEMENTATION_APPROVED
+PHASE1D_DISCORD_EVENT_PIPELINE_APPROVED
 ```
 
-If that state/token is absent, implementation is not authorized.
+If that state or token is absent:
+
+**STOP**
+
+Implementation is not authorized.
 
 ---
 
 # Milestone Objective
 
-Implement the Security Kernel Foundation required for future Guardian capabilities.
+Implement the Guardian Discord Event Pipeline.
 
-The goal is to establish foundational infrastructure only.
+The objective is to connect the Phase 1C Discord Runtime Foundation to Guardian's internal Event Bus through a clean, testable, isolated event pipeline.
 
-No Discord runtime functionality shall be implemented during Phase 1A.
+This milestone may normalize, wrap, dispatch, route, and publish Discord gateway events as internal runtime events.
+
+The event pipeline shall transport and normalize events only.
+
+No event shall trigger a security decision, moderation decision, punishment action, containment action, recovery action, Discord REST enforcement action, or guild mutation during this milestone.
+
+---
+
+# Phase Dependencies
+
+Phase 1D depends on successful completion and certification of:
+
+* Phase 1A — Project Foundation
+* Phase 1B — Runtime Foundation
+* Phase 1C — Discord Runtime Foundation
+
+If Phase 1C runtime interfaces are missing, incomplete, unstable, or contradictory:
+
+**STOP**
+
+Do not redesign Phase 1C.
+
+Do not bypass the runtime abstraction.
+
+Await clarification.
 
 ---
 
 # Authorized Deliverables
 
-The following implementation artifacts are authorized for Phase 1A when implementation is authorized by `.governance/MILESTONE_AUTHORIZATION.md`.
+The following implementation artifacts are authorized for Phase 1D when implementation is authorized by `.governance/MILESTONE_AUTHORIZATION.md`.
 
-## Project Foundation
+## Discord Event Pipeline
 
-- project bootstrap
-- package configuration
-- TypeScript configuration
-- build configuration
-- lint configuration
-- format configuration
-- test configuration
-
----
-
-## Kernel Foundation
-
-- Event Bus contracts and minimal implementation
-- dependency injection skeleton
-- configuration abstractions
+* gateway event dispatcher
+* gateway event adapter layer
+* gateway event normalization
+* gateway event routing
+* gateway event subscription registry
+* runtime-to-EventBus bridge
+* event pipeline lifecycle integration
+* event pipeline health reporting
+* event pipeline error reporting
+* mock gateway event ingestion
+* event metadata envelope
 
 ---
 
-## Shared Infrastructure
+## Gateway Event Abstractions
 
-- shared types
-- shared interfaces
-- shared errors
-- telemetry interfaces
-- metrics interfaces
-- health interfaces
+Implement abstractions only for gateway events.
+
+Authorized event abstractions include:
+
+* raw gateway event envelope
+* normalized gateway event envelope
+* gateway event name
+* gateway event source
+* gateway event timestamp
+* gateway event correlation identifier
+* gateway event payload reference
+* gateway event routing metadata
+
+The event payload shall not be interpreted for security decisions during this milestone.
 
 ---
 
-## Quality Infrastructure
+## Event Normalization
 
-- unit tests
-- contract tests where applicable
-- validation scripts
-- implementation traceability
+Implement event normalization only.
+
+Normalization may include:
+
+* wrapping raw gateway events
+* assigning event metadata
+* assigning event type names
+* assigning timestamps
+* assigning correlation identifiers
+* preserving raw payload references
+* validating structural event shape
+
+Normalization shall not include:
+
+* threat scoring
+* moderation classification
+* punishment decisions
+* trust decisions
+* guild policy evaluation
+* audit-log correlation
+* detector execution
+
+---
+
+## Event Routing
+
+Implement routing infrastructure only.
+
+Routing may include:
+
+* route registration
+* route lookup
+* route dispatch
+* subscription registration
+* subscription removal
+* fan-out to registered handlers
+* publishing normalized events to the internal Event Bus
+
+Routing shall not execute security behavior.
+
+Routing shall not mutate Discord state.
+
+Routing shall not perform Discord REST actions.
+
+---
+
+## Runtime Event Integration
+
+Integrate the Discord Event Pipeline with the existing runtime and Event Bus.
+
+Authorized runtime pipeline events include:
+
+* DiscordEventPipelineStarting
+* DiscordEventPipelineStarted
+* DiscordEventPipelineStopping
+* DiscordEventPipelineStopped
+* DiscordGatewayEventReceived
+* DiscordGatewayEventNormalized
+* DiscordGatewayEventDispatched
+* DiscordGatewayEventDispatchFailed
+* DiscordEventSubscriptionRegistered
+* DiscordEventSubscriptionRemoved
+* DiscordEventPipelineError
+
+---
+
+## Dependency Injection
+
+Register Discord Event Pipeline services through the existing DI container.
+
+Authorized DI work includes:
+
+* event pipeline dispatcher registration
+* event normalizer registration
+* event router registration
+* event subscription registry registration
+* runtime-to-EventBus bridge registration
+* event pipeline health registration
+
+The existing DI container shall not be redesigned.
+
+---
+
+## Testing
+
+Implement tests for:
+
+* gateway event dispatcher
+* gateway event normalization
+* event routing
+* subscription registry
+* Event Bus bridge
+* DI registration
+* pipeline lifecycle
+* error handling
+
+Tests shall not require a live Discord connection.
+
+Tests shall not require a real bot token.
+
+Tests shall not connect to Discord.
+
+Tests shall use mocks, fakes, or in-memory adapters only.
 
 ---
 
@@ -124,254 +271,112 @@ The following implementation artifacts are authorized for Phase 1A when implemen
 
 Implementation shall **not** introduce:
 
-- Discord client
-- Discord gateway
-- bot login
-- slash commands
-- prefix commands
-- event listeners
-- AntiNuke detectors
-- moderation logic
-- AntiSpam logic
-- dashboard
-- database persistence
-- HTTP APIs
-- web services
-- recovery execution
-- containment execution
-- punishment execution
-- SaaS features
-- premium modules
-- AI modules
+* AntiNuke
+* AntiSpam
+* moderation
+* punishment
+* containment
+* recovery
+* detector framework
+* threat scoring
+* raid detection
+* spam detection
+* security policy evaluation
+* trust evaluation
+* FakePerms logic
+* whitelist logic
+* role protection
+* channel protection
+* webhook protection
+* invite protection
+* guild protection logic
+* guild security policy execution
+* guild moderation actions
+* guild cache mutation
+* Discord Audit Log correlation
+* Discord REST enforcement
+* Discord REST mutation
+* ban actions
+* kick actions
+* timeout actions
+* role removal
+* role assignment
+* channel lock
+* channel delete
+* channel restore
+* slash commands
+* prefix commands
+* command framework
+* database persistence
+* HTTP APIs
+* dashboard
+* SaaS features
+* premium modules
+* AI modules
+* bot token commits
+* secret commits
+* live Discord connection during tests
+* production deployment
+
+Implementation shall not redesign existing architecture.
+
+Implementation shall not expand milestone scope.
 
 ---
 
-# Approved Module Dependencies
+# Dependency Rules
 
-The Security Kernel shall be implemented from the lowest-level foundational components upward.
+Implementation shall comply with the following architectural rules:
 
-Each component may depend only on components that appear before it in the approved dependency hierarchy.
+* Event pipeline depends on Phase 1C Discord Runtime abstractions.
+* Event pipeline may publish to the internal Event Bus.
+* Event pipeline may depend on runtime health and logging interfaces.
+* Event pipeline may use the existing DI container.
+* Event pipeline shall not depend on future Security Kernel modules.
+* Event pipeline shall not depend on detector modules.
+* Event pipeline shall not depend on persistence.
+* Event pipeline shall not perform Discord REST mutation.
+* Event pipeline shall not execute security decisions.
 
-The dependency hierarchy for **v0.2.0-security-kernel-foundation** is:
+---
+
+# Authorized File Areas
+
+Implementation should remain within the existing source and test structure.
+
+Authorized source areas include:
 
 ```text
-Configuration
-        ↓
-Shared Types
-        ↓
-Shared Interfaces
-        ↓
-Shared Errors
-        ↓
-Dependency Injection
-        ↓
-Event Bus
-        ↓
-Telemetry
-        ↓
-Metrics
-        ↓
-Health
-        ↓
-Authority Engine
-        ↓
-Trust Registry
-        ↓
-FakePerms Engine
-        ↓
-Policy Engine
-        ↓
-Kernel Integration Tests
+src/core/runtime/discord/
+src/core/runtime/
+src/core/event/
+src/infra/di/
+tests/unit/
 ```
 
-## Dependency Rules
+New files should be narrowly named around event pipeline concerns.
 
-Implementation shall comply with the following architectural rules.
-
-### General Rules
-
-- Components may depend only on preceding layers.
-- Circular dependencies are prohibited.
-- Reverse dependencies are prohibited.
-- Cross-layer shortcuts are prohibited.
-- Every dependency shall have a documented architectural purpose.
+Implementation shall not create dashboard, API, database, command, detector, AntiNuke, AntiSpam, moderation, SaaS, or AI directories during this milestone.
 
 ---
 
-### Configuration
-
-Configuration is the lowest architectural layer.
-
-It shall have no dependency on any Guardian module.
-
----
-
-### Shared Layer
-
-Shared Types, Shared Interfaces, and Shared Errors form the common language of the Security Kernel.
-
-These modules:
-
-- shall remain framework independent;
-- shall remain Discord independent;
-- shall remain database independent;
-- shall remain networking independent;
-- shall expose only reusable contracts and common abstractions.
-
----
-
-### Dependency Injection
-
-Dependency Injection shall:
-
-- construct object graphs;
-- manage service registration;
-- remain implementation independent;
-- avoid third-party frameworks unless explicitly approved.
-
-Dependency Injection shall never contain business logic.
-
----
-
-### Event Bus
-
-The Event Bus is the communication backbone of the Security Kernel.
-
-It shall:
-
-- remain framework independent;
-- remain Discord independent;
-- remain database independent;
-- remain networking independent;
-- remain logging independent;
-- expose contracts separately from implementation.
-
-The Event Bus shall not depend on Telemetry, Metrics, or Health implementations.
-
----
-
-### Telemetry, Metrics, and Health
-
-Telemetry, Metrics, and Health are observational components.
-
-They may:
-
-- observe kernel behavior;
-- consume Event Bus notifications;
-- expose interfaces and abstractions.
-
-They shall not:
-
-- alter decision logic;
-- influence authorization;
-- perform enforcement;
-- introduce runtime side effects.
-
----
-
-### Authority Engine
-
-The Authority Engine shall:
-
-- evaluate Guardian authority;
-- remain deterministic;
-- remain deny-by-default;
-- depend only on approved kernel abstractions.
-
-It shall not perform Discord actions.
-
----
-
-### Trust Registry
-
-The Trust Registry shall:
-
-- manage trust relationships;
-- expose trust contracts;
-- consume Authority Engine contracts only where explicitly required.
-
-Trust decisions shall never imply runtime enforcement.
-
----
-
-### FakePerms Engine
-
-The FakePerms Engine shall:
-
-- evaluate Guardian permissions;
-- consume Authority and Trust Registry contracts;
-- remain independent from Discord permission evaluation.
-
-It shall not:
-
-- punish;
-- contain;
-- modify Discord state.
-
----
-
-### Policy Engine
-
-The Policy Engine is the highest decision layer of the Security Kernel.
-
-It shall:
-
-- evaluate Guardian policy;
-- produce deterministic policy decisions;
-- expose decision results.
-
-It shall never:
-
-- execute punishment;
-- execute containment;
-- call Discord APIs;
-- modify runtime state.
-
----
-
-### Kernel Integration Tests
-
-Kernel Integration Tests are the highest validation layer.
-
-They shall validate:
-
-- component interaction;
-- dependency integrity;
-- contract compliance;
-- architectural boundaries.
-
-Integration Tests shall not require Discord runtime infrastructure.
-
----
-
-## Architectural Principle
-
-The dependency hierarchy defined in this document is normative.
-
-Implementation shall not introduce dependencies that violate this hierarchy without:
-
-1. documented architectural justification;
-2. architecture review;
-3. explicit approval;
-4. an updated implementation contract.
-
-Any unauthorized dependency constitutes architectural drift and shall be treated as a governance violation.
-
----
-
-# Required Deliverables Per Module
-
-Every implementation module shall include:
-
-- interfaces
-- domain models where applicable
-- implementation
-- unit tests
-- integration tests where applicable
-- validation evidence
-- traceability update
-
-No module is complete until all required deliverables are present.
+# Traceability Requirements
+
+Every created or modified implementation file must be recorded in:
+
+```text
+IMPLEMENTATION_TRACEABILITY.md
+```
+
+Each entry must include:
+
+* file path
+* repository document
+* contract
+* milestone
+* tests
+* validation status
+* implementation status
 
 ---
 
@@ -380,7 +385,6 @@ No module is complete until all required deliverables are present.
 Implementation shall successfully execute:
 
 ```bash
-npm install
 npm run lint
 npm run format:check
 npm run typecheck
@@ -388,127 +392,72 @@ npm run build
 npm test
 ```
 
-If execution is impossible, the result must be recorded as:
+If a coverage pipeline exists within the repository, the implementation agent shall also execute:
+
+```bash
+npm run coverage
+```
+
+If validation cannot execute:
 
 ```text
 NOT VERIFIED
 ```
 
-Validation results shall never be fabricated.
+shall be reported.
+
+Validation shall never be fabricated.
 
 ---
 
-# Exit Criteria
+# Required Final Report
 
-A milestone slice is complete only when:
+After completing Phase 1D, the implementation agent shall stop.
 
-- approved scope has been implemented;
-- no out-of-scope work exists;
-- validation passes or is honestly marked `NOT VERIFIED` with reasons;
-- traceability is complete;
-- architecture review is approved;
-- phase completion report is approved;
-- `git status` and `git diff` have been reviewed;
-- commit approval has been granted.
+The final report shall include:
 
----
+1. Implementation summary
+2. Files created
+3. Files modified
+4. Tests added
+5. Validation results
+6. `git status`
+7. `git diff`
+8. Risks
+9. Known limitations
+10. Recommended implementation plan for Phase 2A
 
-# Traceability Requirements
-
-Every implementation artifact shall be recorded in:
-
-```text
-IMPLEMENTATION_TRACEABILITY.md
-```
-
-Minimum fields:
-
-| File | Repository Document | Contract | Milestone | Tests | Validation | Status |
-|---|---|---|---|---|---|---|
-
-Traceability updates shall occur in the same change set as implementation.
+No additional implementation shall occur without further authorization.
 
 ---
 
-# Implementation Restrictions
+# Completion Rule
 
-Implementation agents shall never:
+Phase 1D is complete only when:
 
-- redesign architecture;
-- modify frozen documentation without explicit approval;
-- expand milestone scope;
-- infer approval;
-- commit automatically;
-- push automatically;
-- bypass governance.
+* authorized scope is implemented
+* no unauthorized implementation exists
+* validation passes
+* tests pass
+* traceability is updated
+* Architecture Review is approved
+* Phase Completion Review is approved
+* git status is clean after approved commit
+* git diff has been reviewed
 
-When uncertain:
+---
+
+# Final Rule
+
+Implementation authorization does not imply:
+
+* commit approval
+* push approval
+* merge approval
+* production approval
+
+Those require separate explicit human authorization.
+
+If authorization is absent or ambiguous:
 
 **STOP.**
-
----
-
-# Phase Approval Workflow
-
-```text
-Repository Review
-        ↓
-Implementation Map
-        ↓
-Implementation Contract
-        ↓
-Architecture Approval
-        ↓
-Implementation Authorization
-        ↓
-Implementation
-        ↓
-Validation
-        ↓
-Phase Completion Report
-        ↓
-Architecture Review
-        ↓
-Commit Approval
-        ↓
-Commit
-        ↓
-Push
-```
-
-No stage may be skipped.
-
----
-
-# Certification
-
-This document certifies only the implementation scope for the current milestone.
-
-It does **not** certify:
-
-- production readiness;
-- security readiness;
-- implementation quality;
-- runtime behavior.
-
-Those certifications require successful implementation, validation, and review.
-
----
-
-# Final Principle
-
-Guardian is a contract-driven, architecture-first security platform.
-
-Implementation shall conform to approved architecture.
-
-Implementation shall never redefine architecture.
-
-If authorization is absent:
-
-**STOP.**
-
-Do not generate code.
-
-Do not modify the repository.
-
-Await explicit human approval.
