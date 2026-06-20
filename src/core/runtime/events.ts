@@ -6,6 +6,15 @@ export enum RuntimeEventType {
   ConfigurationLoaded = 'ConfigurationLoaded',
   ConfigurationInvalid = 'ConfigurationInvalid',
   HealthChanged = 'HealthChanged',
+  DiscordRuntimeStarting = 'DiscordRuntimeStarting',
+  DiscordRuntimeStarted = 'DiscordRuntimeStarted',
+  DiscordRuntimeStopping = 'DiscordRuntimeStopping',
+  DiscordRuntimeStopped = 'DiscordRuntimeStopped',
+  DiscordRuntimeDisconnected = 'DiscordRuntimeDisconnected',
+  DiscordRuntimeReconnecting = 'DiscordRuntimeReconnecting',
+  DiscordRuntimeError = 'DiscordRuntimeError',
+  DiscordConfigurationLoaded = 'DiscordConfigurationLoaded',
+  DiscordConfigurationInvalid = 'DiscordConfigurationInvalid',
 }
 
 export interface RuntimeEvent {
