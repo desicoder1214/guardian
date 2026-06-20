@@ -1,10 +1,10 @@
 # Guardian Milestone Authorization
 
-**Milestone:** v0.2.0-phase1C-discord-runtime-foundation
-**Milestone ID:** PHASE_1C_DISCORD_RUNTIME_FOUNDATION
+**Milestone:** v0.2.0-phase1D-discord-event-pipeline
+**Milestone ID:** PHASE_1D_DISCORD_EVENT_PIPELINE
 **Authorization Owner:** Guardian Architecture Authority
 **Status:** Active
-**Version:** 3.0
+**Version:** 4.0
 
 ---
 
@@ -37,7 +37,7 @@ STATE:
 IMPLEMENTATION_AUTHORIZED
 
 TOKEN:
-PHASE1C_DISCORD_RUNTIME_APPROVED
+PHASE1D_DISCORD_EVENT_PIPELINE_APPROVED
 ```
 
 ---
@@ -46,20 +46,44 @@ PHASE1C_DISCORD_RUNTIME_APPROVED
 
 ```text
 Milestone:
-Phase 1C — Discord Runtime Foundation
+Phase 1D — Discord Event Pipeline
 ```
 
 ---
 
 # Milestone Objective
 
-Implement the Guardian Discord Runtime Foundation.
+Implement the Guardian Discord Event Pipeline.
 
-The objective is to establish an isolated Discord runtime adapter layer required by future Guardian Discord integrations.
+The objective is to connect the Phase 1C Discord Runtime Foundation to Guardian's internal Event Bus through a clean, testable, isolated event pipeline.
+
+This milestone may normalize, wrap, classify structurally, dispatch, route, and publish Discord gateway events as internal runtime events.
 
 No AntiNuke, AntiSpam, moderation, punishment, containment, recovery, detector, command, persistence, dashboard, SaaS, or AI behavior shall be implemented during this milestone.
 
-The Discord runtime shall remain isolated behind interfaces and adapters wherever practical.
+The event pipeline shall transport and normalize events only.
+
+No event shall trigger a security decision, moderation decision, punishment action, containment action, recovery action, Discord REST enforcement action, or guild mutation during this milestone.
+
+---
+
+# Phase Dependencies
+
+Phase 1D depends on successful completion and certification of:
+
+* Phase 1A — Project Foundation
+* Phase 1B — Runtime Foundation
+* Phase 1C — Discord Runtime Foundation
+
+If Phase 1C runtime interfaces are missing, incomplete, unstable, or contradictory:
+
+**STOP**
+
+Do not redesign Phase 1C.
+
+Do not bypass the runtime abstraction.
+
+Await clarification.
 
 ---
 
@@ -96,72 +120,155 @@ Implementation may begin only if:
 * Phase Implementation Map = APPROVED
 * Implementation Gate = OPEN
 * STATE = IMPLEMENTATION_AUTHORIZED
+* Phase 1C = CERTIFIED
+* Phase 1C tag exists or Phase 1C commit is identifiable
 
 ---
 
 # Authorized Scope
 
-Implementation is limited to the Discord Runtime Foundation only.
+Implementation is limited to the Discord Event Pipeline only.
 
-## Discord Runtime
+## Discord Event Pipeline
 
-* Discord client abstraction
-* Discord runtime adapter interface
-* Discord runtime adapter implementation
-* Gateway connection abstraction
-* Discord gateway event abstraction
-* login lifecycle wrapper
-* reconnect lifecycle hooks
-* shutdown lifecycle hooks
-* Discord runtime state transitions
+* Gateway event dispatcher
+* Gateway event adapter layer
+* Gateway event normalization
+* Gateway event routing
+* Gateway event subscription registry
+* Runtime-to-EventBus bridge
+* Event pipeline lifecycle integration
+* Event pipeline health reporting
+* Event pipeline error reporting
+* Mock gateway event ingestion
+* Event metadata envelope
 
-  * Disconnected
-  * Connecting
-  * Connected
-  * Reconnecting
-  * Stopping
-* Discord runtime health integration
+---
 
-## Discord Configuration
+## Gateway Event Abstractions
 
-* Discord environment configuration keys
-* typed Discord runtime configuration
-* configuration validation
-* Discord intent configuration
-* Gateway Intents configuration
-* token configuration abstraction
-* Presence abstraction
+Implement abstractions only for gateway events.
 
-## Discord Event Integration
+Authorized event abstractions include:
 
-* DiscordRuntimeStarting
-* DiscordRuntimeStarted
-* DiscordRuntimeStopping
-* DiscordRuntimeStopped
-* DiscordRuntimeDisconnected
-* DiscordRuntimeReconnecting
-* DiscordRuntimeError
-* DiscordConfigurationLoaded
-* DiscordConfigurationInvalid
+* raw gateway event envelope
+* normalized gateway event envelope
+* gateway event name
+* gateway event source
+* gateway event timestamp
+* gateway event correlation identifier
+* gateway event payload reference
+* gateway event routing metadata
+
+The event payload shall not be interpreted for security decisions during this milestone.
+
+---
+
+## Event Normalization
+
+Implement event normalization only.
+
+Normalization may include:
+
+* wrapping raw gateway events
+* assigning event metadata
+* assigning event type names
+* assigning timestamps
+* assigning correlation identifiers
+* preserving raw payload references
+* validating structural event shape
+
+Normalization shall not include:
+
+* threat scoring
+* moderation classification
+* punishment decisions
+* trust decisions
+* guild policy evaluation
+* audit-log correlation
+* detector execution
+
+---
+
+## Event Routing
+
+Implement routing infrastructure only.
+
+Routing may include:
+
+* route registration
+* route lookup
+* route dispatch
+* subscription registration
+* subscription removal
+* fan-out to registered handlers
+* publishing normalized events to the internal Event Bus
+
+Routing shall not execute security behavior.
+
+Routing shall not mutate Discord state.
+
+Routing shall not perform Discord REST actions.
+
+---
+
+## Runtime Event Integration
+
+Integrate the Discord Event Pipeline with the existing runtime and Event Bus.
+
+Authorized runtime pipeline events include:
+
+* DiscordEventPipelineStarting
+* DiscordEventPipelineStarted
+* DiscordEventPipelineStopping
+* DiscordEventPipelineStopped
+* DiscordGatewayEventReceived
+* DiscordGatewayEventNormalized
+* DiscordGatewayEventDispatched
+* DiscordGatewayEventDispatchFailed
+* DiscordEventSubscriptionRegistered
+* DiscordEventSubscriptionRemoved
+* DiscordEventPipelineError
+
+---
 
 ## Dependency Injection
 
-* Discord runtime registration
-* Discord client registration
-* configuration registration
-* runtime service registration
+Register Discord Event Pipeline services through the existing DI container.
+
+Authorized DI work includes:
+
+* event pipeline dispatcher registration
+* event normalizer registration
+* event router registration
+* event subscription registry registration
+* runtime-to-EventBus bridge registration
+* event pipeline health registration
+
+---
 
 ## Testing
 
 Implement:
 
-* Discord runtime adapter tests
-* lifecycle tests
-* configuration tests
+* gateway event dispatcher tests
+* gateway event normalization tests
+* event routing tests
+* subscription registry tests
 * Event Bus bridge tests
-* DI tests
+* DI registration tests
+* pipeline lifecycle tests
+* error handling tests
 
 Tests shall not require a live Discord connection.
+
+Tests shall not require a real bot token.
+
+Tests shall not connect to Discord.
+
+Tests shall use mocks, fakes, or in-memory adapters only.
+
+---
 
 ## Documentation
 
@@ -179,26 +286,42 @@ Documentation shall not expand architectural scope.
 
 The following are outside the authorized milestone:
 
-* Discord client implementation beyond the approved runtime abstraction
-* gateway implementation beyond the approved runtime abstraction
-* slash commands
-* prefix commands
 * AntiNuke
 * AntiSpam
 * moderation
 * punishment
 * containment
 * recovery
-* webhook protection
+* detector framework
+* threat scoring
+* raid detection
+* spam detection
+* security policy evaluation
+* trust evaluation
+* FakePerms logic
+* whitelist logic
 * role protection
 * channel protection
-* Discord Audit Log correlation
-* Discord REST enforcement
-* detector framework
+* webhook protection
+* invite protection
+* guild protection logic
 * guild security policy execution
 * guild moderation actions
-* guild protection logic
 * guild cache mutation
+* Discord Audit Log correlation
+* Discord REST enforcement
+* Discord REST mutation
+* ban actions
+* kick actions
+* timeout actions
+* role removal
+* role assignment
+* channel lock
+* channel delete
+* channel restore
+* slash commands
+* prefix commands
+* command framework
 * database persistence
 * HTTP APIs
 * dashboard
@@ -220,17 +343,20 @@ Implementation shall not expand milestone scope.
 
 The milestone shall deliver:
 
-* Discord runtime abstraction
-* Discord runtime adapter interface
-* Discord runtime adapter implementation
-* Discord configuration
-* Discord lifecycle integration
-* Discord Event Bus bridge
-* Discord runtime health integration
-* DI registration
-* Runtime architecture diagram update (if implementation required changes)
+* Discord Event Pipeline implementation
+* gateway event dispatcher
+* gateway event adapter layer
+* event normalization
+* event routing
+* event subscription registry
+* runtime-to-EventBus bridge
+* event pipeline lifecycle integration
+* event pipeline health reporting
+* event pipeline error reporting
+* DI registration for event pipeline services
+* mock gateway event tests
 * unit tests
-* integration tests
+* integration tests without live Discord
 * validation results
 * traceability updates
 
@@ -274,13 +400,19 @@ Validation shall never be fabricated.
 
 # Exit Criteria
 
-Phase 1C is complete only when:
+Phase 1D is complete only when:
 
 * authorized scope implemented
 * no unauthorized implementation exists
 * no AntiNuke implementation exists
+* no AntiSpam implementation exists
 * no moderation implementation exists
 * no detector implementation exists
+* no punishment implementation exists
+* no containment implementation exists
+* no recovery implementation exists
+* no Discord REST enforcement implementation exists
+* no guild mutation implementation exists
 * no bot token exists in the repository
 * tests require no live Discord connection
 * validation passes
@@ -295,7 +427,7 @@ Phase 1C is complete only when:
 
 # Required Stop Gate
 
-After completing Phase 1C, the implementation agent shall stop.
+After completing Phase 1D, the implementation agent shall stop.
 
 The final report shall include:
 
@@ -308,7 +440,7 @@ The final report shall include:
 7. git diff
 8. Risks
 9. Known limitations
-10. Recommended implementation plan for Phase 1D
+10. Recommended implementation plan for Phase 2A
 
 No additional implementation shall occur without further authorization.
 
