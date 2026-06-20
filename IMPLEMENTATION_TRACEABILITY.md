@@ -95,3 +95,42 @@ Discord runtime functionality, AntiNuke systems, moderation systems, persistence
 Status: **Implemented**
 
 The Discord Runtime Foundation implementation complies with the approved milestone authorization and repository governance. The implementation remains isolated behind runtime abstraction interfaces and does not include unauthorized anti-nuke, moderation, persistence, or live Discord features.
+
+---
+
+## Phase 1D — Discord Event Pipeline
+
+| File                                                   | Repository Document                                | Contract                                 | Milestone                                   | Tests                                          | Validation                                  | Status  |
+| ------------------------------------------------------ | -------------------------------------------------- | ---------------------------------------- | ------------------------------------------- | ---------------------------------------------- | ------------------------------------------- | ------- |
+| `src/core/runtime/events.ts`                            | `IMPLEMENTATION_CONTRACT.md`                       | Runtime Event Definitions                | `v0.2.0-phase1D-discord-event-pipeline`     | `tests/unit/discord-event-pipeline.test.ts`    | lint, format, typecheck, build, test passed | Updated |
+| `src/core/runtime/discord/pipeline-types.ts`           | `IMPLEMENTATION_CONTRACT.md`                       | Discord Gateway Event Types              | `v0.2.0-phase1D-discord-event-pipeline`     | `tests/unit/discord-event-pipeline.test.ts`    | lint, format, typecheck, build, test passed | Created |
+| `src/core/runtime/discord/pipeline.ts`                 | `IMPLEMENTATION_CONTRACT.md`                       | Discord Event Pipeline Implementation    | `v0.2.0-phase1D-discord-event-pipeline`     | `tests/unit/discord-event-pipeline.test.ts`    | lint, format, typecheck, build, test passed | Created |
+| `tests/unit/discord-event-pipeline.test.ts`            | `docs/07-testing/unit-test-contract.md`            | Discord Event Pipeline Validation        | `v0.2.0-phase1D-discord-event-pipeline`     | `npm test`                                    | lint, format, typecheck, build, test passed | Created |
+
+---
+
+## Phase 1D Validation Summary
+
+**Milestone:** `v0.2.0-phase1D-discord-event-pipeline`
+
+**Validation Results** (Post-Refinement)
+
+| Validation   | Result                         |
+| ------------ | ------------------------------ |
+| Lint         | ✅ Passed                       |
+| Format Check | ✅ Passed                       |
+| Type Check   | ✅ Passed                       |
+| Build        | ✅ Passed                       |
+| Unit Tests   | ✅ Passed (9 Suites / 20 Tests) |
+
+**Architectural Refinements Applied**
+
+1. **Correlation ID Abstraction**: Introduced `CorrelationIdGenerator` interface to isolate correlation ID generation behind a factory abstraction rather than inline construction.
+2. **Event Type Corrections**: Replaced unrelated runtime events (`DiscordConfigurationLoaded`, `DiscordRuntimeStopping`, `DiscordRuntimeReconnecting`) with dedicated Phase 1D event types (`DiscordEventPipelineStarted`, `DiscordEventPipelineStopped`, `DiscordGatewayEventReceived`).
+3. **Hardcoded Identifier Removal**: Replaced hardcoded strings (`"discord"`, `"discord-pipeline"`) with module-level constant `PIPELINE_CONTEXT`.
+
+**Implementation Summary**
+
+Status: **Implemented & Refined**
+
+The Discord Event Pipeline implementation is infrastructure-only: it normalizes Discord gateway events, generates correlation IDs via an abstraction layer, publishes normalized events to the internal Event Bus, and fans out to registered handlers. No security, moderation, persistence, REST, audit-log, command, or AntiNuke logic was added. All architectural constraints are met.

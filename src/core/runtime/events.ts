@@ -15,6 +15,17 @@ export enum RuntimeEventType {
   DiscordRuntimeError = 'DiscordRuntimeError',
   DiscordConfigurationLoaded = 'DiscordConfigurationLoaded',
   DiscordConfigurationInvalid = 'DiscordConfigurationInvalid',
+  DiscordEventPipelineStarting = 'DiscordEventPipelineStarting',
+  DiscordEventPipelineStarted = 'DiscordEventPipelineStarted',
+  DiscordEventPipelineStopping = 'DiscordEventPipelineStopping',
+  DiscordEventPipelineStopped = 'DiscordEventPipelineStopped',
+  DiscordGatewayEventReceived = 'DiscordGatewayEventReceived',
+  DiscordGatewayEventNormalized = 'DiscordGatewayEventNormalized',
+  DiscordGatewayEventDispatched = 'DiscordGatewayEventDispatched',
+  DiscordGatewayEventDispatchFailed = 'DiscordGatewayEventDispatchFailed',
+  DiscordEventSubscriptionRegistered = 'DiscordEventSubscriptionRegistered',
+  DiscordEventSubscriptionRemoved = 'DiscordEventSubscriptionRemoved',
+  DiscordEventPipelineError = 'DiscordEventPipelineError',
 }
 
 export interface RuntimeEvent {
