@@ -2,11 +2,11 @@
 
 **Project:** Guardian  
 **Repository:** https://github.com/desicoder1214/guardian  
-**Version:** 4.0.0  
+**Version:** 5.0.0  
 **Status:** Active  
 **Owner:** Guardian Architecture Authority  
-**Current Milestone:** v0.2.0-phase1D-discord-event-pipeline  
-**Current Milestone ID:** PHASE_1D_DISCORD_EVENT_PIPELINE
+**Current Milestone:** v0.3.0-phase2A-discord-gateway-adapter  
+**Current Milestone ID:** PHASE_2A_DISCORD_GATEWAY_ADAPTER
 
 ---
 
@@ -56,10 +56,10 @@ Await clarification.
 
 ```text
 Milestone:
-v0.2.0-phase1D-discord-event-pipeline
+v0.3.0-phase2A-discord-gateway-adapter
 
 Milestone ID:
-PHASE_1D_DISCORD_EVENT_PIPELINE
+PHASE_2A_DISCORD_GATEWAY_ADAPTER
 ```
 
 ---
@@ -75,7 +75,7 @@ STATE:
 IMPLEMENTATION_AUTHORIZED
 
 TOKEN:
-PHASE1D_DISCORD_EVENT_PIPELINE_APPROVED
+PHASE2A_DISCORD_GATEWAY_ADAPTER_APPROVED
 ```
 
 If that state or token is absent:
@@ -88,159 +88,185 @@ Implementation is not authorized.
 
 # Milestone Objective
 
-Implement the Guardian Discord Event Pipeline.
+Implement the Guardian Discord Gateway Adapter.
 
-The objective is to connect the Phase 1C Discord Runtime Foundation to Guardian's internal Event Bus through a clean, testable, isolated event pipeline.
+The objective is to connect Discord gateway event sources to the existing Phase 1D Discord Event Pipeline through a clean, testable, isolated adapter layer.
 
-This milestone may normalize, wrap, dispatch, route, and publish Discord gateway events as internal runtime events.
+This milestone may subscribe to Discord gateway events, wrap gateway payloads into raw gateway event envelopes, and pass those envelopes into the existing Discord Event Pipeline.
 
-The event pipeline shall transport and normalize events only.
+The gateway adapter shall transport gateway events only.
 
-No event shall trigger a security decision, moderation decision, punishment action, containment action, recovery action, Discord REST enforcement action, or guild mutation during this milestone.
+No event shall trigger a security decision, moderation decision, punishment action, containment action, recovery action, Discord REST enforcement action, audit-log correlation, detector execution, FakePerms evaluation, or guild mutation during this milestone.
 
 ---
 
 # Phase Dependencies
 
-Phase 1D depends on successful completion and certification of:
+Phase 2A depends on successful completion and certification of:
 
 * Phase 1A — Project Foundation
 * Phase 1B — Runtime Foundation
 * Phase 1C — Discord Runtime Foundation
+* Phase 1D — Discord Event Pipeline
 
-If Phase 1C runtime interfaces are missing, incomplete, unstable, or contradictory:
+If Phase 1D event pipeline interfaces are missing, incomplete, unstable, or contradictory:
 
 **STOP**
 
-Do not redesign Phase 1C.
+Do not redesign Phase 1D.
 
-Do not bypass the runtime abstraction.
+Do not bypass the event pipeline abstraction.
 
 Await clarification.
 
 ---
 
+# Repository Integrity Gate
+
+Startup verification is strictly read-only.
+
+Before implementation begins, the implementation agent shall execute:
+
+```bash
+git status --short
+git diff --stat
+git diff --name-only
+```
+
+If any unexpected modification exists:
+
+**STOP**
+
+Do not implement.
+
+Do not repair automatically.
+
+Report the unexpected files and await Architecture Review.
+
+During startup, the implementation agent shall not create, modify, delete, rename, format, normalize, or update any repository file.
+
+No write operation is authorized until authorization and repository integrity have both been verified.
+
+---
+
 # Authorized Deliverables
 
-The following implementation artifacts are authorized for Phase 1D when implementation is authorized by `.governance/MILESTONE_AUTHORIZATION.md`.
+The following implementation artifacts are authorized for Phase 2A when implementation is authorized by `.governance/MILESTONE_AUTHORIZATION.md`.
 
-## Discord Event Pipeline
+## Discord Gateway Adapter
 
-* gateway event dispatcher
-* gateway event adapter layer
-* gateway event normalization
-* gateway event routing
-* gateway event subscription registry
-* runtime-to-EventBus bridge
-* event pipeline lifecycle integration
-* event pipeline health reporting
-* event pipeline error reporting
-* mock gateway event ingestion
-* event metadata envelope
-
----
-
-## Gateway Event Abstractions
-
-Implement abstractions only for gateway events.
-
-Authorized event abstractions include:
-
-* raw gateway event envelope
-* normalized gateway event envelope
-* gateway event name
-* gateway event source
-* gateway event timestamp
-* gateway event correlation identifier
-* gateway event payload reference
-* gateway event routing metadata
-
-The event payload shall not be interpreted for security decisions during this milestone.
+* gateway adapter interface
+* gateway adapter implementation
+* Discord gateway event source abstraction
+* Discord gateway subscription wrapper
+* Discord gateway lifecycle hooks
+* gateway connect abstraction
+* gateway disconnect abstraction
+* gateway reconnect abstraction
+* gateway shutdown abstraction
+* gateway event listener registration
+* gateway event listener removal
+* gateway-to-pipeline bridge
+* mapping Discord gateway payloads to raw gateway event envelopes
+* passing raw gateway event envelopes into the existing Discord Event Pipeline
+* adapter health reporting
+* adapter error reporting
+* adapter lifecycle events
+* mock gateway adapter for tests
+* fake gateway event source for tests
 
 ---
 
-## Event Normalization
+## Gateway Event Mapping
 
-Implement event normalization only.
+The adapter may map Discord gateway events into the Phase 1D raw gateway event envelope.
 
-Normalization may include:
+Authorized mapping includes:
 
-* wrapping raw gateway events
-* assigning event metadata
-* assigning event type names
-* assigning timestamps
-* assigning correlation identifiers
-* preserving raw payload references
-* validating structural event shape
+* event name
+* sequence number if available
+* op code if available
+* raw payload reference
+* source metadata
+* timestamp
+* adapter correlation identifier if required by the existing pipeline contract
 
-Normalization shall not include:
+The adapter shall not interpret payloads for security, moderation, punishment, containment, recovery, trust, FakePerms, or policy decisions.
 
-* threat scoring
-* moderation classification
-* punishment decisions
-* trust decisions
-* guild policy evaluation
-* audit-log correlation
-* detector execution
+The adapter shall not perform guild state mutation.
 
 ---
 
-## Event Routing
+## Gateway Lifecycle Integration
 
-Implement routing infrastructure only.
+The adapter may expose and test gateway lifecycle behavior.
 
-Routing may include:
+Authorized lifecycle behavior includes:
 
-* route registration
-* route lookup
-* route dispatch
+* start
+* stop
+* connect
+* disconnect
+* reconnect
+* shutdown
 * subscription registration
 * subscription removal
-* fan-out to registered handlers
-* publishing normalized events to the internal Event Bus
+* error reporting
+* health reporting
 
-Routing shall not execute security behavior.
+Lifecycle integration shall not perform security behavior.
 
-Routing shall not mutate Discord state.
+Lifecycle integration shall not mutate guild state.
 
-Routing shall not perform Discord REST actions.
+Lifecycle integration shall not perform Discord REST enforcement.
 
 ---
 
 ## Runtime Event Integration
 
-Integrate the Discord Event Pipeline with the existing runtime and Event Bus.
+Integrate the Discord Gateway Adapter with the existing runtime and Event Bus.
 
-Authorized runtime pipeline events include:
+Authorized runtime adapter events include:
 
-* DiscordEventPipelineStarting
-* DiscordEventPipelineStarted
-* DiscordEventPipelineStopping
-* DiscordEventPipelineStopped
-* DiscordGatewayEventReceived
-* DiscordGatewayEventNormalized
-* DiscordGatewayEventDispatched
-* DiscordGatewayEventDispatchFailed
-* DiscordEventSubscriptionRegistered
-* DiscordEventSubscriptionRemoved
-* DiscordEventPipelineError
+* DiscordGatewayAdapterStarting
+* DiscordGatewayAdapterStarted
+* DiscordGatewayAdapterStopping
+* DiscordGatewayAdapterStopped
+* DiscordGatewayAdapterConnected
+* DiscordGatewayAdapterDisconnected
+* DiscordGatewayAdapterReconnecting
+* DiscordGatewayAdapterError
+* DiscordGatewayAdapterEventReceived
+* DiscordGatewayAdapterEventForwarded
+* DiscordGatewayAdapterEventForwardFailed
+
+If the existing runtime event enum requires extension, add only these Phase 2A events.
 
 ---
 
 ## Dependency Injection
 
-Register Discord Event Pipeline services through the existing DI container.
+Register Discord Gateway Adapter services through the existing DI container.
 
 Authorized DI work includes:
 
-* event pipeline dispatcher registration
-* event normalizer registration
-* event router registration
-* event subscription registry registration
-* runtime-to-EventBus bridge registration
-* event pipeline health registration
+* gateway adapter registration
+* gateway event source registration
+* gateway-to-pipeline bridge registration
+* mock gateway adapter registration for tests
+* adapter health registration
 
 The existing DI container shall not be redesigned.
+
+---
+
+## Dependency Policy
+
+If a Discord gateway library dependency is required, the implementation agent may add a minimal, pinned dependency only for gateway adapter integration.
+
+Dependency changes shall be reported explicitly in the final implementation report.
+
+No dependency may be added for AntiNuke, moderation, persistence, dashboard, SaaS, AI, or unrelated functionality.
 
 ---
 
@@ -248,14 +274,13 @@ The existing DI container shall not be redesigned.
 
 Implement tests for:
 
-* gateway event dispatcher
-* gateway event normalization
-* event routing
-* subscription registry
-* Event Bus bridge
+* gateway adapter lifecycle
+* gateway event mapping
+* gateway-to-pipeline bridge
+* mock gateway event source
+* adapter error handling
 * DI registration
-* pipeline lifecycle
-* error handling
+* no-live-Discord execution
 
 Tests shall not require a live Discord connection.
 
@@ -278,6 +303,7 @@ Implementation shall **not** introduce:
 * containment
 * recovery
 * detector framework
+* audit-log correlation
 * threat scoring
 * raid detection
 * spam detection
@@ -292,8 +318,7 @@ Implementation shall **not** introduce:
 * guild protection logic
 * guild security policy execution
 * guild moderation actions
-* guild cache mutation
-* Discord Audit Log correlation
+* guild cache mutation beyond gateway event transport requirements
 * Discord REST enforcement
 * Discord REST mutation
 * ban actions
@@ -328,15 +353,16 @@ Implementation shall not expand milestone scope.
 
 Implementation shall comply with the following architectural rules:
 
-* Event pipeline depends on Phase 1C Discord Runtime abstractions.
-* Event pipeline may publish to the internal Event Bus.
-* Event pipeline may depend on runtime health and logging interfaces.
-* Event pipeline may use the existing DI container.
-* Event pipeline shall not depend on future Security Kernel modules.
-* Event pipeline shall not depend on detector modules.
-* Event pipeline shall not depend on persistence.
-* Event pipeline shall not perform Discord REST mutation.
-* Event pipeline shall not execute security decisions.
+* Gateway adapter depends on Phase 1C Discord Runtime abstractions.
+* Gateway adapter depends on Phase 1D Discord Event Pipeline abstractions.
+* Gateway adapter may publish to the internal Event Bus only through existing runtime/event abstractions.
+* Gateway adapter may depend on runtime health and logging interfaces.
+* Gateway adapter may use the existing DI container.
+* Gateway adapter shall not depend on future Security Kernel modules.
+* Gateway adapter shall not depend on detector modules.
+* Gateway adapter shall not depend on persistence.
+* Gateway adapter shall not perform Discord REST mutation.
+* Gateway adapter shall not execute security decisions.
 
 ---
 
@@ -354,7 +380,7 @@ src/infra/di/
 tests/unit/
 ```
 
-New files should be narrowly named around event pipeline concerns.
+New files should be narrowly named around gateway adapter concerns.
 
 Implementation shall not create dashboard, API, database, command, detector, AntiNuke, AntiSpam, moderation, SaaS, or AI directories during this milestone.
 
@@ -412,7 +438,7 @@ Validation shall never be fabricated.
 
 # Required Final Report
 
-After completing Phase 1D, the implementation agent shall stop.
+After completing Phase 2A, the implementation agent shall stop.
 
 The final report shall include:
 
@@ -423,9 +449,10 @@ The final report shall include:
 5. Validation results
 6. `git status`
 7. `git diff`
-8. Risks
-9. Known limitations
-10. Recommended implementation plan for Phase 2A
+8. Dependencies added or changed
+9. Risks
+10. Known limitations
+11. Recommended implementation plan for Phase 2B
 
 No additional implementation shall occur without further authorization.
 
@@ -433,7 +460,7 @@ No additional implementation shall occur without further authorization.
 
 # Completion Rule
 
-Phase 1D is complete only when:
+Phase 2A is complete only when:
 
 * authorized scope is implemented
 * no unauthorized implementation exists
