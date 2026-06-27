@@ -23,6 +23,14 @@ import {
   SecurityRuntimeOrchestrator,
 } from '../../src/core/runtime/discord/security-runtime-orchestrator';
 import {
+  InMemorySecurityRuntimeEngine,
+  SecurityRuntimeEngine,
+} from '../../src/core/runtime/discord/security-runtime-engine';
+import {
+  InMemoryRuntimeResultAggregator,
+  RuntimeExecutionSummary,
+} from '../../src/core/runtime/discord/security-runtime-result-aggregator';
+import {
   SecurityActionType as SecurityPolicyActionType,
   SecurityDecision,
 } from '../../src/core/runtime/discord/security-policy-types';
@@ -403,6 +411,200 @@ test('runtime orchestration remains side-effect free', async () => {
 
   try {
     await orchestrator.orchestrate(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_CREATE);
+    expect(fetchMock).not.toHaveBeenCalled();
+  } finally {
+    (globalThis as { fetch?: unknown }).fetch = previousFetch;
+  }
+});
+
+test('runtime engine delegates once and preserves identity inputs', async () => {
+  const orchestrate = jest.fn().mockResolvedValue(
+    Object.freeze({
+      decision: {
+        decision: SecurityDecision.ALLOW,
+        reason: SecurityDecisionReason.POLICY_ALLOW,
+        confidence: AuditAttributionConfidence.HIGH,
+        actorId: 'actor-1',
+        guildId: 'guild-1',
+        actionType: SecurityPolicyActionType.CHANNEL_CREATE,
+        correlationId: 'corr-1',
+        auditLogCorrelationId: 'audit-1',
+        metadata: Object.freeze({ source: 'orchestrator' }),
+      },
+      actionPlan: Object.freeze({
+        decision: SecurityDecision.ALLOW,
+        actions: Object.freeze([]),
+        correlationId: 'corr-1',
+      }),
+      executionResults: Object.freeze([]),
+      correlationId: 'corr-1',
+      metadata: Object.freeze({ orchestrator: 'mock-orchestrator' }),
+    }),
+  );
+
+  const orchestrator = { orchestrate } as unknown as SecurityRuntimeOrchestrator;
+  const engine: SecurityRuntimeEngine = new InMemorySecurityRuntimeEngine(orchestrator);
+  const event = normalizedEvent();
+
+  const result = await engine.process(event, 'actor-1', SecurityPolicyActionType.CHANNEL_CREATE);
+
+  expect(orchestrate).toHaveBeenCalledTimes(1);
+  expect(orchestrate).toHaveBeenCalledWith(event, 'actor-1', SecurityPolicyActionType.CHANNEL_CREATE);
+  expect(result.correlationId).toBe('corr-1');
+  expect(result.metadata).toMatchObject({
+    engine: 'in-memory-security-runtime-engine',
+    processedAt: event.timestamp,
+    correlationId: 'corr-1',
+    orchestrator: 'mock-orchestrator',
+  });
+});
+
+test('runtime engine result is immutable', async () => {
+  const orchestrator = createOrchestrator(SecurityDecision.ALLOW, () => {
+    // Intentionally empty.
+  });
+  const engine = new InMemorySecurityRuntimeEngine(orchestrator);
+
+  const result = await engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_CREATE);
+
+  expect(Object.isFrozen(result)).toBe(true);
+  expect(Object.isFrozen(result.metadata ?? {})).toBe(true);
+
+  expect(() => {
+    (result as { correlationId: string }).correlationId = 'mutated';
+  }).toThrow(TypeError);
+
+  expect(() => {
+    (result.metadata as Record<string, unknown>).engine = 'changed';
+  }).toThrow(TypeError);
+});
+
+test('runtime engine wraps orchestrator errors consistently', async () => {
+  const orchestrator = {
+    orchestrate: jest.fn().mockRejectedValue(new Error('orchestrator failure')),
+  } as unknown as SecurityRuntimeOrchestrator;
+  const engine = new InMemorySecurityRuntimeEngine(orchestrator);
+
+  await expect(engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_CREATE)).rejects.toThrow(
+    'InMemorySecurityRuntimeEngine.process failed: orchestrator failure',
+  );
+});
+
+test('runtime engine remains side-effect free', async () => {
+  const previousFetch = (globalThis as { fetch?: unknown }).fetch;
+  const fetchMock = jest.fn();
+  (globalThis as { fetch?: unknown }).fetch = fetchMock;
+
+  const engine = new InMemorySecurityRuntimeEngine(createOrchestrator(SecurityDecision.ALLOW, () => {}));
+
+  try {
+    await engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_CREATE);
+    expect(fetchMock).not.toHaveBeenCalled();
+  } finally {
+    (globalThis as { fetch?: unknown }).fetch = previousFetch;
+  }
+});
+
+function runtimeResultForAggregator(states: ExecutionState[]): RuntimeExecutionSummary | never {
+  const aggregator = new InMemoryRuntimeResultAggregator();
+  const runtimeResult = {
+    decision: {
+      decision: SecurityDecision.INVESTIGATE,
+      reason: SecurityDecisionReason.ATTRIBUTION_LOW_CONFIDENCE,
+      confidence: AuditAttributionConfidence.HIGH,
+      actorId: 'actor-1',
+      guildId: 'guild-1',
+      actionType: SecurityPolicyActionType.CHANNEL_CREATE,
+      correlationId: 'corr-1',
+      auditLogCorrelationId: 'audit-1',
+      metadata: Object.freeze({ source: 'runtime-result-fixture' }),
+    },
+    actionPlan: Object.freeze({
+      decision: SecurityDecision.INVESTIGATE,
+      actions: Object.freeze([]),
+      correlationId: 'corr-1',
+    }),
+    executionResults: Object.freeze(
+      states.map((state, index) =>
+        Object.freeze({
+          success: state === ExecutionState.SUCCESS,
+          state,
+          actionType: SecurityActionType.CREATE_INCIDENT,
+          executorId: `executor-${index + 1}`,
+          metadata: Object.freeze({ state }),
+        }),
+      ),
+    ),
+    correlationId: 'corr-1',
+    metadata: Object.freeze({ source: 'runtime-result-fixture' }),
+  } as never;
+
+  return aggregator.aggregate(runtimeResult);
+}
+
+test('runtime result aggregation counts mixed states correctly', () => {
+  const summary = runtimeResultForAggregator([
+    ExecutionState.SUCCESS,
+    ExecutionState.FAILED,
+    ExecutionState.DENIED,
+    ExecutionState.SKIPPED,
+    ExecutionState.DRY_RUN,
+    ExecutionState.SUCCESS,
+  ]);
+
+  expect(summary.correlationId).toBe('corr-1');
+  expect(summary.totalActions).toBe(6);
+  expect(summary.successCount).toBe(2);
+  expect(summary.failedCount).toBe(1);
+  expect(summary.deniedCount).toBe(1);
+  expect(summary.skippedCount).toBe(1);
+  expect(summary.dryRunCount).toBe(1);
+  expect(summary.executedCount).toBe(2);
+});
+
+test('runtime result aggregation final state precedence is deterministic', () => {
+  const summary = runtimeResultForAggregator([
+    ExecutionState.SUCCESS,
+    ExecutionState.DRY_RUN,
+    ExecutionState.SKIPPED,
+    ExecutionState.DENIED,
+    ExecutionState.FAILED,
+  ]);
+
+  expect(summary.finalState).toBe(ExecutionState.FAILED);
+});
+
+test('runtime result aggregation preserves correlationId and populates processedAt', () => {
+  const summary = runtimeResultForAggregator([ExecutionState.SUCCESS]);
+
+  expect(summary.correlationId).toBe('corr-1');
+  expect(summary.processedAt).toBeDefined();
+  expect(Number.isNaN(Date.parse(summary.processedAt))).toBe(false);
+});
+
+test('runtime result aggregation returns immutable summary', () => {
+  const summary = runtimeResultForAggregator([ExecutionState.SUCCESS, ExecutionState.SKIPPED]);
+
+  expect(Object.isFrozen(summary)).toBe(true);
+  expect(Object.isFrozen(summary.metadata ?? {})).toBe(true);
+
+  expect(() => {
+    (summary as { totalActions: number }).totalActions = 99;
+  }).toThrow(TypeError);
+
+  expect(() => {
+    (summary.metadata as Record<string, unknown>).engine = 'changed';
+  }).toThrow(TypeError);
+});
+
+test('runtime result aggregation remains side-effect free', () => {
+  const previousFetch = (globalThis as { fetch?: unknown }).fetch;
+  const fetchMock = jest.fn();
+  (globalThis as { fetch?: unknown }).fetch = fetchMock;
+
+  try {
+    const summary = runtimeResultForAggregator([ExecutionState.SUCCESS]);
+    expect(summary.finalState).toBe(ExecutionState.SUCCESS);
     expect(fetchMock).not.toHaveBeenCalled();
   } finally {
     (globalThis as { fetch?: unknown }).fetch = previousFetch;
