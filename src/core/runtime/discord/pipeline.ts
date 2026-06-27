@@ -9,6 +9,9 @@ import {
   CorrelationIdGenerator,
 } from './pipeline-types';
 import { RuntimeEventType } from '../events';
+import { DiscordEventNormalizer, DefaultDiscordEventNormalizer } from './event-normalizer';
+import { DiscordEventRouter, InMemoryDiscordEventRouter } from './event-router';
+import { InMemoryDiscordDetectorRegistry } from './detector-registry';
 
 class DefaultCorrelationIdGenerator implements CorrelationIdGenerator {
   generate(eventName: string): string {
@@ -22,14 +25,20 @@ export class InMemoryDiscordEventPipeline implements DiscordEventPipeline {
   private handlers: DiscordEventHandler[] = [];
   private running = false;
   private readonly correlationIdGenerator: CorrelationIdGenerator;
+  private readonly normalizer: DiscordEventNormalizer;
+  private readonly router: DiscordEventRouter;
 
   constructor(
     private readonly eventBus: EventBus,
     private readonly health: HealthService,
     private readonly logger: Logger,
     correlationIdGenerator?: CorrelationIdGenerator,
+    normalizer?: DiscordEventNormalizer,
+    router?: DiscordEventRouter,
   ) {
     this.correlationIdGenerator = correlationIdGenerator ?? new DefaultCorrelationIdGenerator();
+    this.normalizer = normalizer ?? new DefaultDiscordEventNormalizer(this.correlationIdGenerator);
+    this.router = router ?? new InMemoryDiscordEventRouter(new InMemoryDiscordDetectorRegistry());
   }
 
   async start(): Promise<void> {
@@ -57,28 +66,23 @@ export class InMemoryDiscordEventPipeline implements DiscordEventPipeline {
       throw new Error('pipeline not started');
     }
 
-    const correlationId = this.correlationIdGenerator.generate(raw.t);
-    const normalized: DiscordGatewayNormalizedEvent = {
-      eventName: raw.t,
-      source: 'discord-gateway',
-      timestamp: raw.ts ?? new Date().toISOString(),
-      correlationId,
-      payload: raw.d ?? null,
-    };
+    const normalized: DiscordGatewayNormalizedEvent = this.normalizer.normalize(raw);
 
     // publish received runtime event
     this.publishRuntimeEvent(RuntimeEventType.DiscordGatewayEventReceived, { eventName: raw.t });
 
     // publish normalized as KernelEvent to EventBus
     const kernelEvent: KernelEvent = {
-      id: `${correlationId}-event`,
-      correlationId,
+      id: `${normalized.correlationId}-event`,
+      correlationId: normalized.correlationId,
       guildId: PIPELINE_CONTEXT,
       type: RuntimeEventType.DiscordGatewayEventNormalized,
       payload: normalized,
     };
 
     await this.eventBus.publish(kernelEvent);
+
+    await this.router.route(normalized);
 
     // fan-out to registered handlers
     await Promise.all(this.handlers.map((h) => h(normalized)));
