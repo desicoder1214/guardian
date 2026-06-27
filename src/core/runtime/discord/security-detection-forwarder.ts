@@ -9,6 +9,9 @@ import { SecurityActionPlanner } from './security-action-planner';
 const DETECTION_EVENT_TO_SECURITY_ACTION_TYPE_MAP: Readonly<Record<string, SecurityActionType>> = {
   BOT_ADD: SecurityActionType.BOT_ADD,
   GUILD_MEMBER_ADD: SecurityActionType.BOT_ADD,
+  GUILD_MEMBER_UPDATE: SecurityActionType.ROLE_CREATE,
+  GUILD_ROLE_UPDATE: SecurityActionType.ROLE_CREATE,
+  MEMBER_ROLE_ADD: SecurityActionType.ROLE_CREATE,
 };
 
 export class InMemorySecurityDetectionForwarder implements SecurityEvaluationDetectionPipeline {
