@@ -41,8 +41,12 @@ export interface SecurityDecisionResult {
   readonly actionType: SecurityActionType;
   readonly eventName: string;
   readonly reason: string;
+  readonly policyEnabled?: boolean;
+  readonly thresholdExceeded?: boolean;
+  readonly trustedActorIds?: readonly string[];
   readonly observedCount?: number;
   readonly threshold?: number;
+  readonly metadata?: Record<string, unknown>;
 }
 
 export interface SecurityPolicyEngine {

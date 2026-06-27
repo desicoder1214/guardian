@@ -25,6 +25,10 @@ export class InMemorySecurityPolicyEngine implements SecurityPolicyEngine {
         actionType: context.actionType,
         eventName: context.eventName,
         reason: 'guildId missing from security context',
+        policyEnabled: false,
+        thresholdExceeded: false,
+        trustedActorIds: [],
+        metadata: { state: 'missing-guild-id' },
       };
     }
 
@@ -37,6 +41,10 @@ export class InMemorySecurityPolicyEngine implements SecurityPolicyEngine {
         actionType: context.actionType,
         eventName: context.eventName,
         reason: 'no policy configured',
+        policyEnabled: false,
+        thresholdExceeded: false,
+        trustedActorIds: [],
+        metadata: { state: 'missing-policy' },
       };
     }
 
@@ -49,6 +57,10 @@ export class InMemorySecurityPolicyEngine implements SecurityPolicyEngine {
         actionType: context.actionType,
         eventName: context.eventName,
         reason: 'no matching threshold rule',
+        policyEnabled: false,
+        thresholdExceeded: false,
+        trustedActorIds: policy.trustedUserIds,
+        metadata: { state: 'missing-rule' },
       };
     }
 
@@ -60,6 +72,10 @@ export class InMemorySecurityPolicyEngine implements SecurityPolicyEngine {
         actionType: context.actionType,
         eventName: context.eventName,
         reason: 'threshold rule disabled',
+        policyEnabled: false,
+        thresholdExceeded: false,
+        trustedActorIds: policy.trustedUserIds,
+        metadata: { state: 'rule-disabled' },
       };
     }
 
@@ -79,8 +95,12 @@ export class InMemorySecurityPolicyEngine implements SecurityPolicyEngine {
         actionType: context.actionType,
         eventName: context.eventName,
         reason: 'within threshold',
+        policyEnabled: true,
+        thresholdExceeded: false,
+        trustedActorIds: policy.trustedUserIds,
         observedCount: tracked.observedCount,
         threshold: rule.threshold,
+        metadata: { state: 'within-threshold', windowMs: rule.windowMs },
       };
     }
 
@@ -91,8 +111,12 @@ export class InMemorySecurityPolicyEngine implements SecurityPolicyEngine {
       actionType: context.actionType,
       eventName: context.eventName,
       reason: 'threshold exceeded',
+      policyEnabled: true,
+      thresholdExceeded: true,
+      trustedActorIds: policy.trustedUserIds,
       observedCount: tracked.observedCount,
       threshold: rule.threshold,
+      metadata: { state: 'threshold-exceeded', windowMs: rule.windowMs },
     };
   }
 
