@@ -134,6 +134,29 @@ test('correlationId is preserved', () => {
   expect(first.correlationId).toBe('corr-1');
 });
 
+test('plans are immutable at runtime', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan(buildDecision(SecurityDecision.BLOCK));
+
+  expect(Object.isFrozen(plan)).toBe(true);
+  expect(Object.isFrozen(plan.actions)).toBe(true);
+  expect(Object.isFrozen(plan.actions[0])).toBe(true);
+  expect(Object.isFrozen(plan.actions[0].metadata as object)).toBe(true);
+  expect(() => {
+    (plan.actions as unknown as unknown[]).push(SecurityActionType.ESCALATE);
+  }).toThrow();
+});
+
+test('planning is side-effect free for input decision model', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const decision = buildDecision(SecurityDecision.CONTAIN);
+  const original = JSON.parse(JSON.stringify(decision));
+
+  planner.plan(decision);
+
+  expect(decision).toEqual(original);
+});
+
 test('priorities are typed enums, not numeric', () => {
   const planner = new InMemorySecurityActionPlanner();
   const plan = planner.plan(buildDecision(SecurityDecision.BLOCK));

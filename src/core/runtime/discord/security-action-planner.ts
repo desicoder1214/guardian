@@ -72,21 +72,25 @@ export class InMemorySecurityActionPlanner implements SecurityActionPlanner {
   plan(decisionModel: SecurityDecisionModel): SecurityActionPlan {
     const actionTypes = this.resolveActions(decisionModel.decision);
     const uniqueActionTypes = [...new Set(actionTypes)];
-    const actions = uniqueActionTypes.map((type, index) => ({
-      type,
-      priority: ACTION_PRIORITY_MAP[type],
-      sequence: index + 1,
-      metadata: {
+    const actions = uniqueActionTypes.map((type, index) => {
+      const metadata = Object.freeze({
         decision: decisionModel.decision,
         reason: decisionModel.reason,
-      },
-    }));
+      });
 
-    return {
+      return Object.freeze({
+        type,
+        priority: ACTION_PRIORITY_MAP[type],
+        sequence: index + 1,
+        metadata,
+      });
+    });
+
+    return Object.freeze({
       decision: decisionModel.decision,
-      actions,
+      actions: Object.freeze(actions),
       correlationId: decisionModel.correlationId,
-    };
+    });
   }
 
   private resolveActions(decision: SecurityDecision): readonly SecurityActionType[] {
