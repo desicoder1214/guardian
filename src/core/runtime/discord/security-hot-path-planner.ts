@@ -191,7 +191,35 @@ function resolveAuthorizationRequirement(
   );
 }
 
-function resolveContainmentMapping(action: SecurityAction, correlationId: string): ContainmentMapping {
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readString(record: Record<string, unknown> | undefined, ...keys: string[]): string | undefined {
+  if (!record) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveContainmentMapping(
+  action: SecurityAction,
+  correlationId: string,
+  securityDecisionMetadata?: unknown,
+): ContainmentMapping {
+  const decisionMetadata = readRecord(securityDecisionMetadata);
   const baseMetadata = Object.freeze({
     sourceActionType: action.type,
     sourceActionSequence: action.sequence,
@@ -199,15 +227,34 @@ function resolveContainmentMapping(action: SecurityAction, correlationId: string
 
   switch (action.type) {
     case SecurityActionType.REMOVE_UNAUTHORIZED_BOT:
+      {
+        const guildId = readString(decisionMetadata, 'guildId', 'guild_id');
+        const botUserId = readString(
+          decisionMetadata,
+          'botUserId',
+          'bot_user_id',
+          'botId',
+          'bot_id',
+          'targetId',
+          'target_id',
+          'resourceId',
+          'resource_id',
+        );
+
       return {
         strategy: SecurityContainmentStrategy.REMOVE,
         target: Object.freeze({
           resourceType: SecurityResourceType.BOT,
-          resourceId: `bot:${correlationId}:${action.sequence}`,
+          resourceId: botUserId ?? `bot:${correlationId}:${action.sequence}`,
           correlationId,
-          metadata: baseMetadata,
+          metadata: Object.freeze({
+            ...baseMetadata,
+            guildId,
+            botUserId,
+          }),
         }),
       };
+      }
     case SecurityActionType.REMOVE_DANGEROUS_ROLE:
       return {
         strategy: SecurityContainmentStrategy.REMOVE,
@@ -318,9 +365,10 @@ function freezeHotPathAction(
   action: SecurityAction,
   correlationId: string,
   authorizationRequirement: ExecutionAuthorizationRequirement | undefined,
+  securityDecisionMetadata?: unknown,
 ): SecurityHotPathAction {
   const classification = classifyAction(action.type);
-  const containmentMapping = resolveContainmentMapping(action, correlationId);
+  const containmentMapping = resolveContainmentMapping(action, correlationId, securityDecisionMetadata);
 
   return Object.freeze({
     actionType: action.type,
@@ -383,6 +431,7 @@ export class InMemorySecurityHotPathPlanner implements SecurityHotPathPlanner {
           action,
           executionPlan.correlationId,
           resolveAuthorizationRequirement(action, authorizationRequirements),
+          executionPlan.securityDecision.metadata,
         ),
       )
       .sort((left, right) => {

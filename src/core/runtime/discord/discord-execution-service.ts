@@ -976,12 +976,14 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
     while (attemptCount < this.maxAttempts) {
       attemptCount += 1;
       try {
-        const response = await this.operation.removeUnauthorizedBot({
-          correlationId: normalizedRequest.correlationId,
-          guildId: normalizedRequest.guildId,
-          botUserId: normalizedRequest.botUserId,
-          reason: normalizedRequest.reason,
-        });
+        const response = await this.operation.removeUnauthorizedBot(
+          Object.freeze({
+            correlationId: normalizedRequest.correlationId,
+            guildId: normalizedRequest.guildId,
+            botUserId: normalizedRequest.botUserId,
+            reason: normalizedRequest.reason,
+          }),
+        );
 
         if (response.ok || isAlreadyRemoved(response)) {
           const verificationOutcome = isAlreadyRemoved(response)
