@@ -18,6 +18,20 @@ import {
   InMemorySecurityExecutorRegistry,
   SecurityExecutorRegistryRoutingResult,
 } from './executor-registry';
+import {
+  CoordinatedContainmentExecutionDependencies,
+  CoordinatedContainmentExecutionResult,
+  InMemoryCoordinatedContainmentExecution,
+} from './coordinated-containment-execution';
+
+export {
+  CoordinatedContainmentActionStatus,
+} from './coordinated-containment-execution';
+export type {
+  CoordinatedContainmentActionResult,
+  CoordinatedContainmentExecutionResult,
+  CoordinatedContainmentExecutionDependencies,
+} from './coordinated-containment-execution';
 
 export interface SecurityExecutionOrchestrationContext {
   readonly executionPlan: SecurityExecutionPlan;
@@ -80,6 +94,7 @@ function freezeResult(
 
 export class InMemorySecurityExecutionOrchestrator implements SecurityExecutionOrchestrator {
   private readonly completedByKey = new Map<string, SecurityExecutionOrchestrationResult>();
+  private readonly coordinatedContainmentExecution = new InMemoryCoordinatedContainmentExecution();
 
   constructor(
     private readonly hotPathPlanner: SecurityHotPathPlanner = new InMemorySecurityHotPathPlanner(),
@@ -144,5 +159,13 @@ export class InMemorySecurityExecutionOrchestrator implements SecurityExecutionO
 
     this.completedByKey.set(key, created);
     return created;
+  }
+
+  async executeCoordinatedContainment(
+    context: SecurityExecutionOrchestrationContext,
+    dependencies: CoordinatedContainmentExecutionDependencies,
+  ): Promise<CoordinatedContainmentExecutionResult> {
+    const orchestration = this.orchestrate(context);
+    return this.coordinatedContainmentExecution.execute(orchestration, dependencies);
   }
 }
