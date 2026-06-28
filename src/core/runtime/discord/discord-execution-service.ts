@@ -49,10 +49,80 @@ export enum DiscordBotRemovalVerificationOutcome {
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
 }
 
+export enum DiscordRoleRemovalVerificationOutcome {
+  SUCCESS = 'SUCCESS',
+  ALREADY_ABSENT = 'ALREADY_ABSENT',
+  PERMISSION_FAILURE = 'PERMISSION_FAILURE',
+  FAILURE = 'FAILURE',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+}
+
+export enum DiscordWebhookRemovalVerificationOutcome {
+  SUCCESS = 'SUCCESS',
+  ALREADY_REMOVED = 'ALREADY_REMOVED',
+  PERMISSION_FAILURE = 'PERMISSION_FAILURE',
+  FAILURE = 'FAILURE',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+}
+
+export enum DiscordChannelContainmentVerificationOutcome {
+  SUCCESS = 'SUCCESS',
+  ALREADY_CONTAINED = 'ALREADY_CONTAINED',
+  PERMISSION_FAILURE = 'PERMISSION_FAILURE',
+  FAILURE = 'FAILURE',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+}
+
+export enum DiscordPermissionOverwriteVerificationOutcome {
+  SUCCESS = 'SUCCESS',
+  ALREADY_RESTORED = 'ALREADY_RESTORED',
+  PERMISSION_FAILURE = 'PERMISSION_FAILURE',
+  FAILURE = 'FAILURE',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+}
+
 export interface DiscordBotRemovalExecutionRequest {
   readonly correlationId: string;
   readonly guildId?: string;
   readonly botUserId?: string;
+  readonly idempotencyKey?: string;
+  readonly reason?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DiscordRoleRemovalExecutionRequest {
+  readonly correlationId: string;
+  readonly guildId?: string;
+  readonly memberUserId?: string;
+  readonly roleId?: string;
+  readonly idempotencyKey?: string;
+  readonly reason?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DiscordWebhookRemovalExecutionRequest {
+  readonly correlationId: string;
+  readonly guildId?: string;
+  readonly webhookId?: string;
+  readonly idempotencyKey?: string;
+  readonly reason?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DiscordChannelContainmentExecutionRequest {
+  readonly correlationId: string;
+  readonly guildId?: string;
+  readonly channelId?: string;
+  readonly idempotencyKey?: string;
+  readonly reason?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DiscordPermissionOverwriteExecutionRequest {
+  readonly correlationId: string;
+  readonly guildId?: string;
+  readonly channelId?: string;
+  readonly overwriteId?: string;
   readonly idempotencyKey?: string;
   readonly reason?: string;
   readonly metadata?: Record<string, unknown>;
@@ -85,6 +155,118 @@ export interface DiscordBotRemovalOperation {
   removeUnauthorizedBot(request: DiscordBotRemovalOperationRequest): Promise<DiscordBotRemovalOperationResponse>;
 }
 
+export interface DiscordRoleRemovalOperationRequest {
+  readonly correlationId: string;
+  readonly guildId: string;
+  readonly memberUserId: string;
+  readonly roleId: string;
+  readonly reason?: string;
+}
+
+export interface DiscordRoleRemovalOperationResponse {
+  readonly ok: boolean;
+  readonly statusCode: number;
+  readonly rateLimit?: {
+    readonly retryAfterMs?: number;
+    readonly bucketId?: string;
+    readonly global?: boolean;
+  };
+  readonly error?: {
+    readonly code?: string;
+    readonly message: string;
+    readonly retryable?: boolean;
+  };
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DiscordRoleRemovalOperation {
+  removeDangerousRole(request: DiscordRoleRemovalOperationRequest): Promise<DiscordRoleRemovalOperationResponse>;
+}
+
+export interface DiscordWebhookRemovalOperationRequest {
+  readonly correlationId: string;
+  readonly webhookId: string;
+  readonly guildId?: string;
+  readonly reason?: string;
+}
+
+export interface DiscordWebhookRemovalOperationResponse {
+  readonly ok: boolean;
+  readonly statusCode: number;
+  readonly rateLimit?: {
+    readonly retryAfterMs?: number;
+    readonly bucketId?: string;
+    readonly global?: boolean;
+  };
+  readonly error?: {
+    readonly code?: string;
+    readonly message: string;
+    readonly retryable?: boolean;
+  };
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DiscordWebhookRemovalOperation {
+  removeDangerousWebhook(request: DiscordWebhookRemovalOperationRequest): Promise<DiscordWebhookRemovalOperationResponse>;
+}
+
+export interface DiscordChannelContainmentOperationRequest {
+  readonly correlationId: string;
+  readonly channelId: string;
+  readonly guildId?: string;
+  readonly reason?: string;
+}
+
+export interface DiscordChannelContainmentOperationResponse {
+  readonly ok: boolean;
+  readonly statusCode: number;
+  readonly rateLimit?: {
+    readonly retryAfterMs?: number;
+    readonly bucketId?: string;
+    readonly global?: boolean;
+  };
+  readonly error?: {
+    readonly code?: string;
+    readonly message: string;
+    readonly retryable?: boolean;
+  };
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DiscordChannelContainmentOperation {
+  containChannel(request: DiscordChannelContainmentOperationRequest): Promise<DiscordChannelContainmentOperationResponse>;
+}
+
+export interface DiscordPermissionOverwriteOperationRequest {
+  readonly correlationId: string;
+  readonly channelId: string;
+  readonly overwriteId: string;
+  readonly guildId?: string;
+  readonly reason?: string;
+}
+
+export interface DiscordPermissionOverwriteOperationResponse {
+  readonly ok: boolean;
+  readonly statusCode: number;
+  readonly rateLimit?: {
+    readonly retryAfterMs?: number;
+    readonly bucketId?: string;
+    readonly global?: boolean;
+  };
+  readonly error?: {
+    readonly code?: string;
+    readonly message: string;
+    readonly retryable?: boolean;
+  };
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DiscordPermissionOverwriteOperation {
+  restorePermissionOverwrite(
+    request: DiscordPermissionOverwriteOperationRequest,
+  ): Promise<DiscordPermissionOverwriteOperationResponse>;
+}
+
 export interface MemberExecutionService {
   banMember(correlationId: string): Promise<DiscordExecutionResult>;
   kickMember(correlationId: string): Promise<DiscordExecutionResult>;
@@ -93,18 +275,19 @@ export interface MemberExecutionService {
 
 export interface RoleExecutionService {
   restoreRole(correlationId: string): Promise<DiscordExecutionResult>;
+  removeDangerousRole(request: string | DiscordRoleRemovalExecutionRequest): Promise<DiscordExecutionResult>;
 }
 
 export interface ChannelExecutionService {
-  lockChannel(correlationId: string): Promise<DiscordExecutionResult>;
+  lockChannel(request: string | DiscordChannelContainmentExecutionRequest): Promise<DiscordExecutionResult>;
   unlockChannel(correlationId: string): Promise<DiscordExecutionResult>;
-  restoreChannel(correlationId: string): Promise<DiscordExecutionResult>;
+  restoreChannel(request: string | DiscordPermissionOverwriteExecutionRequest): Promise<DiscordExecutionResult>;
 }
 
 export interface WebhookExecutionService {
-  deleteWebhook(correlationId: string): Promise<DiscordExecutionResult>;
+  deleteWebhook(request: string | DiscordWebhookRemovalExecutionRequest): Promise<DiscordExecutionResult>;
   restoreWebhook(correlationId: string): Promise<DiscordExecutionResult>;
-  freezeWebhooks(correlationId: string): Promise<DiscordExecutionResult>;
+  freezeWebhooks(request: string | DiscordWebhookRemovalExecutionRequest): Promise<DiscordExecutionResult>;
 }
 
 export interface GuildExecutionService {
@@ -148,15 +331,38 @@ export interface InMemoryDiscordExecutionServiceOptions {
 
 export interface ProductionDiscordExecutionServiceOptions {
   readonly maxAttempts?: number;
-  readonly supportedOperation?: 'REMOVE_UNAUTHORIZED_BOT';
+  readonly supportedOperation?:
+    | 'REMOVE_UNAUTHORIZED_BOT'
+    | 'REMOVE_DANGEROUS_ROLE'
+    | 'REMOVE_DANGEROUS_WEBHOOK'
+    | 'LOCK_CHANNELS'
+    | 'RESTORE_PERMISSION_OVERWRITE';
 }
 
-interface FrozenBotExecutionMetadata {
-  readonly operation: 'REMOVE_UNAUTHORIZED_BOT';
+export interface ProductionDiscordExecutionServiceDependencies {
+  readonly botRemovalOperation?: DiscordBotRemovalOperation;
+  readonly roleRemovalOperation?: DiscordRoleRemovalOperation;
+  readonly webhookRemovalOperation?: DiscordWebhookRemovalOperation;
+  readonly channelContainmentOperation?: DiscordChannelContainmentOperation;
+  readonly permissionOverwriteOperation?: DiscordPermissionOverwriteOperation;
+}
+
+interface FrozenExecutionMetadata {
+  readonly operation:
+    | 'REMOVE_UNAUTHORIZED_BOT'
+    | 'REMOVE_DANGEROUS_ROLE'
+    | 'REMOVE_DANGEROUS_WEBHOOK'
+    | 'LOCK_CHANNELS'
+    | 'RESTORE_PERMISSION_OVERWRITE';
   readonly idempotencyKey: string;
   readonly httpStatus: number;
   readonly verification: {
-    readonly outcome: DiscordBotRemovalVerificationOutcome;
+    readonly outcome:
+      | DiscordBotRemovalVerificationOutcome
+      | DiscordRoleRemovalVerificationOutcome
+        | DiscordWebhookRemovalVerificationOutcome
+        | DiscordChannelContainmentVerificationOutcome
+        | DiscordPermissionOverwriteVerificationOutcome;
   };
   readonly duplicate?: boolean;
   readonly retry: DiscordExecutionRetryMetadata;
@@ -206,7 +412,7 @@ function freezeErrorMetadata(metadata?: DiscordExecutionErrorMetadata): DiscordE
 }
 
 function freezeExecutionResult(result: DiscordExecutionResult): DiscordExecutionResult {
-  const metadataRecord = result.metadata as FrozenBotExecutionMetadata | undefined;
+  const metadataRecord = result.metadata as FrozenExecutionMetadata | undefined;
   return Object.freeze({
     status: result.status,
     executionTimeMs: result.executionTimeMs,
@@ -228,8 +434,20 @@ function freezeExecutionResult(result: DiscordExecutionResult): DiscordExecution
 }
 
 function freezeVerification(metadata: {
-  outcome: DiscordBotRemovalVerificationOutcome;
-}): { readonly outcome: DiscordBotRemovalVerificationOutcome } {
+  outcome:
+    | DiscordBotRemovalVerificationOutcome
+    | DiscordRoleRemovalVerificationOutcome
+    | DiscordWebhookRemovalVerificationOutcome
+    | DiscordChannelContainmentVerificationOutcome
+    | DiscordPermissionOverwriteVerificationOutcome;
+}): {
+  readonly outcome:
+    | DiscordBotRemovalVerificationOutcome
+    | DiscordRoleRemovalVerificationOutcome
+    | DiscordWebhookRemovalVerificationOutcome
+    | DiscordChannelContainmentVerificationOutcome
+    | DiscordPermissionOverwriteVerificationOutcome;
+} {
   return Object.freeze({ outcome: metadata.outcome });
 }
 
@@ -256,7 +474,96 @@ function resolveIdempotencyKey(request: DiscordBotRemovalExecutionRequest): stri
   return request.idempotencyKey ?? request.correlationId;
 }
 
-function mapErrorCode(response?: DiscordBotRemovalOperationResponse): DiscordExecutionErrorCode {
+function coerceRoleRequest(request: string | DiscordRoleRemovalExecutionRequest): DiscordRoleRemovalExecutionRequest {
+  if (typeof request === 'string') {
+    return Object.freeze({ correlationId: request, idempotencyKey: request });
+  }
+
+  return Object.freeze({
+    correlationId: request.correlationId,
+    guildId: request.guildId,
+    memberUserId: request.memberUserId,
+    roleId: request.roleId,
+    idempotencyKey: request.idempotencyKey,
+    reason: request.reason,
+    metadata: freezeMetadata(request.metadata),
+  });
+}
+
+function resolveRoleIdempotencyKey(request: DiscordRoleRemovalExecutionRequest): string {
+  return request.idempotencyKey ?? request.correlationId;
+}
+
+function coerceWebhookRequest(request: string | DiscordWebhookRemovalExecutionRequest): DiscordWebhookRemovalExecutionRequest {
+  if (typeof request === 'string') {
+    return Object.freeze({ correlationId: request, idempotencyKey: request });
+  }
+
+  return Object.freeze({
+    correlationId: request.correlationId,
+    guildId: request.guildId,
+    webhookId: request.webhookId,
+    idempotencyKey: request.idempotencyKey,
+    reason: request.reason,
+    metadata: freezeMetadata(request.metadata),
+  });
+}
+
+function resolveWebhookIdempotencyKey(request: DiscordWebhookRemovalExecutionRequest): string {
+  return request.idempotencyKey ?? request.correlationId;
+}
+
+function coerceChannelContainmentRequest(
+  request: string | DiscordChannelContainmentExecutionRequest,
+): DiscordChannelContainmentExecutionRequest {
+  if (typeof request === 'string') {
+    return Object.freeze({ correlationId: request, idempotencyKey: request });
+  }
+
+  return Object.freeze({
+    correlationId: request.correlationId,
+    guildId: request.guildId,
+    channelId: request.channelId,
+    idempotencyKey: request.idempotencyKey,
+    reason: request.reason,
+    metadata: freezeMetadata(request.metadata),
+  });
+}
+
+function resolveChannelContainmentIdempotencyKey(request: DiscordChannelContainmentExecutionRequest): string {
+  return request.idempotencyKey ?? request.correlationId;
+}
+
+function coercePermissionOverwriteRequest(
+  request: string | DiscordPermissionOverwriteExecutionRequest,
+): DiscordPermissionOverwriteExecutionRequest {
+  if (typeof request === 'string') {
+    return Object.freeze({ correlationId: request, idempotencyKey: request });
+  }
+
+  return Object.freeze({
+    correlationId: request.correlationId,
+    guildId: request.guildId,
+    channelId: request.channelId,
+    overwriteId: request.overwriteId,
+    idempotencyKey: request.idempotencyKey,
+    reason: request.reason,
+    metadata: freezeMetadata(request.metadata),
+  });
+}
+
+function resolvePermissionOverwriteIdempotencyKey(request: DiscordPermissionOverwriteExecutionRequest): string {
+  return request.idempotencyKey ?? request.correlationId;
+}
+
+function mapErrorCode(
+  response?:
+    | DiscordBotRemovalOperationResponse
+    | DiscordRoleRemovalOperationResponse
+    | DiscordWebhookRemovalOperationResponse
+    | DiscordChannelContainmentOperationResponse
+    | DiscordPermissionOverwriteOperationResponse,
+): DiscordExecutionErrorCode {
   if (!response) {
     return DiscordExecutionErrorCode.UNKNOWN_ERROR;
   }
@@ -277,7 +584,13 @@ function mapErrorCode(response?: DiscordBotRemovalOperationResponse): DiscordExe
 }
 
 function resolveFailureCode(
-  response: DiscordBotRemovalOperationResponse | undefined,
+  response:
+    | DiscordBotRemovalOperationResponse
+    | DiscordRoleRemovalOperationResponse
+    | DiscordWebhookRemovalOperationResponse
+    | DiscordChannelContainmentOperationResponse
+    | DiscordPermissionOverwriteOperationResponse
+    | undefined,
   failureCause: unknown,
 ): DiscordExecutionErrorCode {
   if (response?.error?.code === 'UNKNOWN_ERROR') {
@@ -319,6 +632,43 @@ function isPermissionFailure(response: DiscordBotRemovalOperationResponse): bool
   return response.statusCode === 403 || response.error?.code === 'PERMISSION_DENIED' || response.error?.code === 'MISSING_PERMISSIONS';
 }
 
+function isRoleAlreadyAbsent(response: DiscordRoleRemovalOperationResponse): boolean {
+  return (
+    response.statusCode === 404 ||
+    response.error?.code === 'ALREADY_ABSENT' ||
+    response.error?.code === 'UNKNOWN_MEMBER' ||
+    response.error?.code === 'UNKNOWN_ROLE'
+  );
+}
+
+function isRolePermissionFailure(response: DiscordRoleRemovalOperationResponse): boolean {
+  return response.statusCode === 403 || response.error?.code === 'PERMISSION_DENIED' || response.error?.code === 'MISSING_PERMISSIONS';
+}
+
+function isWebhookAlreadyRemoved(response: DiscordWebhookRemovalOperationResponse): boolean {
+  return response.statusCode === 404 || response.error?.code === 'ALREADY_REMOVED' || response.error?.code === 'UNKNOWN_WEBHOOK';
+}
+
+function isWebhookPermissionFailure(response: DiscordWebhookRemovalOperationResponse): boolean {
+  return response.statusCode === 403 || response.error?.code === 'PERMISSION_DENIED' || response.error?.code === 'MISSING_PERMISSIONS';
+}
+
+function isChannelAlreadyContained(response: DiscordChannelContainmentOperationResponse): boolean {
+  return response.statusCode === 409 || response.error?.code === 'ALREADY_CONTAINED';
+}
+
+function isChannelPermissionFailure(response: DiscordChannelContainmentOperationResponse): boolean {
+  return response.statusCode === 403 || response.error?.code === 'PERMISSION_DENIED' || response.error?.code === 'MISSING_PERMISSIONS';
+}
+
+function isPermissionOverwriteAlreadyRestored(response: DiscordPermissionOverwriteOperationResponse): boolean {
+  return response.statusCode === 404 || response.error?.code === 'ALREADY_RESTORED' || response.error?.code === 'UNKNOWN_OVERWRITE';
+}
+
+function isPermissionOverwritePermissionFailure(response: DiscordPermissionOverwriteOperationResponse): boolean {
+  return response.statusCode === 403 || response.error?.code === 'PERMISSION_DENIED' || response.error?.code === 'MISSING_PERMISSIONS';
+}
+
 abstract class BaseInMemoryExecutionService {
   protected buildResult(service: string, operation: string, correlationId: string): DiscordExecutionResult {
     return Object.freeze({
@@ -352,33 +702,42 @@ class InMemoryRoleExecutionService extends BaseInMemoryExecutionService implemen
   async restoreRole(correlationId: string): Promise<DiscordExecutionResult> {
     return this.buildResult('role', 'restoreRole', correlationId);
   }
+
+  async removeDangerousRole(request: string | DiscordRoleRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceRoleRequest(request);
+    return this.buildResult('role', 'removeDangerousRole', normalizedRequest.correlationId);
+  }
 }
 
 class InMemoryChannelExecutionService extends BaseInMemoryExecutionService implements ChannelExecutionService {
-  async lockChannel(correlationId: string): Promise<DiscordExecutionResult> {
-    return this.buildResult('channel', 'lockChannel', correlationId);
+  async lockChannel(request: string | DiscordChannelContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceChannelContainmentRequest(request);
+    return this.buildResult('channel', 'lockChannel', normalizedRequest.correlationId);
   }
 
   async unlockChannel(correlationId: string): Promise<DiscordExecutionResult> {
     return this.buildResult('channel', 'unlockChannel', correlationId);
   }
 
-  async restoreChannel(correlationId: string): Promise<DiscordExecutionResult> {
-    return this.buildResult('channel', 'restoreChannel', correlationId);
+  async restoreChannel(request: string | DiscordPermissionOverwriteExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coercePermissionOverwriteRequest(request);
+    return this.buildResult('channel', 'restoreChannel', normalizedRequest.correlationId);
   }
 }
 
 class InMemoryWebhookExecutionService extends BaseInMemoryExecutionService implements WebhookExecutionService {
-  async deleteWebhook(correlationId: string): Promise<DiscordExecutionResult> {
-    return this.buildResult('webhook', 'deleteWebhook', correlationId);
+  async deleteWebhook(request: string | DiscordWebhookRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceWebhookRequest(request);
+    return this.buildResult('webhook', 'deleteWebhook', normalizedRequest.correlationId);
   }
 
   async restoreWebhook(correlationId: string): Promise<DiscordExecutionResult> {
     return this.buildResult('webhook', 'restoreWebhook', correlationId);
   }
 
-  async freezeWebhooks(correlationId: string): Promise<DiscordExecutionResult> {
-    return this.buildResult('webhook', 'freezeWebhooks', correlationId);
+  async freezeWebhooks(request: string | DiscordWebhookRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceWebhookRequest(request);
+    return this.buildResult('webhook', 'freezeWebhooks', normalizedRequest.correlationId);
   }
 }
 
@@ -444,10 +803,23 @@ class UnsupportedRoleExecutionService implements RoleExecutionService {
   async restoreRole(correlationId: string): Promise<DiscordExecutionResult> {
     return unsupportedResult('role', 'restoreRole', correlationId);
   }
+
+  async removeDangerousRole(request: string | DiscordRoleRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
+    return unsupportedResult('role', 'removeDangerousRole', correlationId);
+  }
+}
+
+class UnsupportedBotExecutionService implements BotExecutionService {
+  async removeUnauthorizedBot(request: string | DiscordBotRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
+    return unsupportedResult('bot', 'removeUnauthorizedBot', correlationId);
+  }
 }
 
 class UnsupportedChannelExecutionService implements ChannelExecutionService {
-  async lockChannel(correlationId: string): Promise<DiscordExecutionResult> {
+  async lockChannel(request: string | DiscordChannelContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
     return unsupportedResult('channel', 'lockChannel', correlationId);
   }
 
@@ -455,13 +827,15 @@ class UnsupportedChannelExecutionService implements ChannelExecutionService {
     return unsupportedResult('channel', 'unlockChannel', correlationId);
   }
 
-  async restoreChannel(correlationId: string): Promise<DiscordExecutionResult> {
+  async restoreChannel(request: string | DiscordPermissionOverwriteExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
     return unsupportedResult('channel', 'restoreChannel', correlationId);
   }
 }
 
 class UnsupportedWebhookExecutionService implements WebhookExecutionService {
-  async deleteWebhook(correlationId: string): Promise<DiscordExecutionResult> {
+  async deleteWebhook(request: string | DiscordWebhookRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
     return unsupportedResult('webhook', 'deleteWebhook', correlationId);
   }
 
@@ -469,7 +843,8 @@ class UnsupportedWebhookExecutionService implements WebhookExecutionService {
     return unsupportedResult('webhook', 'restoreWebhook', correlationId);
   }
 
-  async freezeWebhooks(correlationId: string): Promise<DiscordExecutionResult> {
+  async freezeWebhooks(request: string | DiscordWebhookRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
     return unsupportedResult('webhook', 'freezeWebhooks', correlationId);
   }
 }
@@ -541,7 +916,7 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
     const idempotencyKey = resolveIdempotencyKey(normalizedRequest);
     const cached = this.completedByIdempotencyKey.get(idempotencyKey);
     if (cached) {
-      const metadata = cached.metadata as FrozenBotExecutionMetadata | undefined;
+      const metadata = cached.metadata as FrozenExecutionMetadata | undefined;
       return freezeExecutionResult({
         status: DiscordExecutionStatus.SKIPPED,
         executionTimeMs: 0,
@@ -709,19 +1084,821 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
   }
 }
 
+export class ProductionDiscordRoleExecutionService implements RoleExecutionService {
+  private readonly completedByIdempotencyKey = new Map<string, DiscordExecutionResult>();
+  private readonly maxAttempts: number;
+
+  constructor(
+    private readonly operation: DiscordRoleRemovalOperation,
+    options: ProductionDiscordExecutionServiceOptions = {},
+  ) {
+    const merged = { ...DEFAULT_PRODUCTION_OPTIONS, ...options };
+    this.maxAttempts = Math.max(1, Math.floor(merged.maxAttempts));
+  }
+
+  async restoreRole(correlationId: string): Promise<DiscordExecutionResult> {
+    return unsupportedResult('role', 'restoreRole', correlationId);
+  }
+
+  async removeDangerousRole(request: string | DiscordRoleRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceRoleRequest(request);
+    const idempotencyKey = resolveRoleIdempotencyKey(normalizedRequest);
+    const cached = this.completedByIdempotencyKey.get(idempotencyKey);
+    if (cached) {
+      const metadata = cached.metadata as FrozenExecutionMetadata | undefined;
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.SKIPPED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'REMOVE_DANGEROUS_ROLE',
+          idempotencyKey,
+          httpStatus: metadata?.httpStatus ?? 200,
+          verification: {
+            outcome: metadata?.verification?.outcome ?? DiscordRoleRemovalVerificationOutcome.SUCCESS,
+          },
+          duplicate: true,
+          retry: metadata?.retry ?? {
+            bounded: true,
+            attemptCount: 1,
+            maxAttempts: this.maxAttempts,
+            exhausted: false,
+          },
+          rateLimit: metadata?.rateLimit ?? { limited: false },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    if (!normalizedRequest.guildId || !normalizedRequest.memberUserId || !normalizedRequest.roleId) {
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.FAILED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'REMOVE_DANGEROUS_ROLE',
+          idempotencyKey,
+          httpStatus: 0,
+          verification: { outcome: DiscordRoleRemovalVerificationOutcome.FAILURE },
+          retry: {
+            bounded: true,
+            attemptCount: 0,
+            maxAttempts: this.maxAttempts,
+            exhausted: true,
+          },
+          rateLimit: { limited: false },
+          error: {
+            code: DiscordExecutionErrorCode.VALIDATION_ERROR,
+            message: 'guildId, memberUserId and roleId are required for production execution',
+            retryable: false,
+          },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    let attemptCount = 0;
+    const startedAt = nowMs();
+    let lastFailure: DiscordRoleRemovalOperationResponse | undefined;
+    let lastFailureCause: unknown;
+
+    while (attemptCount < this.maxAttempts) {
+      attemptCount += 1;
+      try {
+        const response = await this.operation.removeDangerousRole({
+          correlationId: normalizedRequest.correlationId,
+          guildId: normalizedRequest.guildId,
+          memberUserId: normalizedRequest.memberUserId,
+          roleId: normalizedRequest.roleId,
+          reason: normalizedRequest.reason,
+        });
+
+        if (response.ok || isRoleAlreadyAbsent(response)) {
+          const verificationOutcome = isRoleAlreadyAbsent(response)
+            ? DiscordRoleRemovalVerificationOutcome.ALREADY_ABSENT
+            : DiscordRoleRemovalVerificationOutcome.SUCCESS;
+
+          const successResult = freezeExecutionResult({
+            status: DiscordExecutionStatus.SUCCESS,
+            executionTimeMs: Math.max(0, nowMs() - startedAt),
+            correlationId: normalizedRequest.correlationId,
+            metadata: {
+              operation: 'REMOVE_DANGEROUS_ROLE',
+              idempotencyKey,
+              httpStatus: response.statusCode,
+              verification: {
+                outcome: verificationOutcome,
+              },
+              retry: {
+                bounded: true,
+                attemptCount,
+                maxAttempts: this.maxAttempts,
+                exhausted: false,
+              },
+              rateLimit: {
+                limited: false,
+                retryAfterMs: response.rateLimit?.retryAfterMs,
+                bucketId: response.rateLimit?.bucketId,
+                global: response.rateLimit?.global,
+              },
+              metadata: Object.freeze({
+                statusCode: response.statusCode,
+                ...response.metadata,
+                ...normalizedRequest.metadata,
+              }),
+            },
+          });
+          this.completedByIdempotencyKey.set(idempotencyKey, successResult);
+          return successResult;
+        }
+
+        lastFailure = response;
+        const isRetryable = Boolean(response.error?.retryable) || response.statusCode === 429;
+        if (!isRetryable) {
+          break;
+        }
+      } catch (error) {
+        lastFailureCause = error;
+      }
+    }
+
+    const failureCode = resolveFailureCode(lastFailure, lastFailureCause);
+    const failureMessage = lastFailure?.error?.message ?? parseFailureCause(lastFailureCause);
+    const permissionFailure = lastFailure ? isRolePermissionFailure(lastFailure) : false;
+    const verificationOutcome = permissionFailure
+      ? DiscordRoleRemovalVerificationOutcome.PERMISSION_FAILURE
+      : failureCode === DiscordExecutionErrorCode.UNKNOWN_ERROR
+        ? DiscordRoleRemovalVerificationOutcome.UNKNOWN_ERROR
+        : DiscordRoleRemovalVerificationOutcome.FAILURE;
+    const retryable =
+      lastFailure?.error?.retryable ??
+      (failureCode === DiscordExecutionErrorCode.RATE_LIMITED ||
+        failureCode === DiscordExecutionErrorCode.NETWORK_ERROR);
+
+    return freezeExecutionResult({
+      status: DiscordExecutionStatus.FAILED,
+      executionTimeMs: Math.max(0, nowMs() - startedAt),
+      correlationId: normalizedRequest.correlationId,
+      metadata: {
+        operation: 'REMOVE_DANGEROUS_ROLE',
+        idempotencyKey,
+        httpStatus: lastFailure?.statusCode ?? 0,
+        verification: {
+          outcome: verificationOutcome,
+        },
+        retry: {
+          bounded: true,
+          attemptCount,
+          maxAttempts: this.maxAttempts,
+          exhausted: true,
+        },
+        rateLimit: {
+          limited: failureCode === DiscordExecutionErrorCode.RATE_LIMITED,
+          retryAfterMs: lastFailure?.rateLimit?.retryAfterMs,
+          bucketId: lastFailure?.rateLimit?.bucketId,
+          global: lastFailure?.rateLimit?.global,
+        },
+        error: {
+          code: failureCode,
+          message: failureMessage,
+          retryable,
+          cause: lastFailureCause !== undefined ? parseFailureCause(lastFailureCause) : undefined,
+        },
+        metadata: Object.freeze({
+          statusCode: lastFailure?.statusCode,
+          ...lastFailure?.metadata,
+          ...normalizedRequest.metadata,
+        }),
+      },
+    });
+  }
+}
+
+export class ProductionDiscordWebhookExecutionService implements WebhookExecutionService {
+  private readonly completedByIdempotencyKey = new Map<string, DiscordExecutionResult>();
+  private readonly maxAttempts: number;
+
+  constructor(
+    private readonly operation: DiscordWebhookRemovalOperation,
+    options: ProductionDiscordExecutionServiceOptions = {},
+  ) {
+    const merged = { ...DEFAULT_PRODUCTION_OPTIONS, ...options };
+    this.maxAttempts = Math.max(1, Math.floor(merged.maxAttempts));
+  }
+
+  async deleteWebhook(request: string | DiscordWebhookRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceWebhookRequest(request);
+    const idempotencyKey = resolveWebhookIdempotencyKey(normalizedRequest);
+    const cached = this.completedByIdempotencyKey.get(idempotencyKey);
+    if (cached) {
+      const metadata = cached.metadata as FrozenExecutionMetadata | undefined;
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.SKIPPED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'REMOVE_DANGEROUS_WEBHOOK',
+          idempotencyKey,
+          httpStatus: metadata?.httpStatus ?? 200,
+          verification: {
+            outcome: metadata?.verification?.outcome ?? DiscordWebhookRemovalVerificationOutcome.SUCCESS,
+          },
+          duplicate: true,
+          retry: metadata?.retry ?? {
+            bounded: true,
+            attemptCount: 1,
+            maxAttempts: this.maxAttempts,
+            exhausted: false,
+          },
+          rateLimit: metadata?.rateLimit ?? { limited: false },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    if (!normalizedRequest.webhookId) {
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.FAILED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'REMOVE_DANGEROUS_WEBHOOK',
+          idempotencyKey,
+          httpStatus: 0,
+          verification: { outcome: DiscordWebhookRemovalVerificationOutcome.FAILURE },
+          retry: {
+            bounded: true,
+            attemptCount: 0,
+            maxAttempts: this.maxAttempts,
+            exhausted: true,
+          },
+          rateLimit: { limited: false },
+          error: {
+            code: DiscordExecutionErrorCode.VALIDATION_ERROR,
+            message: 'webhookId is required for production execution',
+            retryable: false,
+          },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    let attemptCount = 0;
+    const startedAt = nowMs();
+    let lastFailure: DiscordWebhookRemovalOperationResponse | undefined;
+    let lastFailureCause: unknown;
+
+    while (attemptCount < this.maxAttempts) {
+      attemptCount += 1;
+      try {
+        const response = await this.operation.removeDangerousWebhook({
+          correlationId: normalizedRequest.correlationId,
+          webhookId: normalizedRequest.webhookId,
+          guildId: normalizedRequest.guildId,
+          reason: normalizedRequest.reason,
+        });
+
+        if (response.ok || isWebhookAlreadyRemoved(response)) {
+          const verificationOutcome = isWebhookAlreadyRemoved(response)
+            ? DiscordWebhookRemovalVerificationOutcome.ALREADY_REMOVED
+            : DiscordWebhookRemovalVerificationOutcome.SUCCESS;
+
+          const successResult = freezeExecutionResult({
+            status: DiscordExecutionStatus.SUCCESS,
+            executionTimeMs: Math.max(0, nowMs() - startedAt),
+            correlationId: normalizedRequest.correlationId,
+            metadata: {
+              operation: 'REMOVE_DANGEROUS_WEBHOOK',
+              idempotencyKey,
+              httpStatus: response.statusCode,
+              verification: {
+                outcome: verificationOutcome,
+              },
+              retry: {
+                bounded: true,
+                attemptCount,
+                maxAttempts: this.maxAttempts,
+                exhausted: false,
+              },
+              rateLimit: {
+                limited: false,
+                retryAfterMs: response.rateLimit?.retryAfterMs,
+                bucketId: response.rateLimit?.bucketId,
+                global: response.rateLimit?.global,
+              },
+              metadata: Object.freeze({
+                guildId: normalizedRequest.guildId,
+                webhookId: normalizedRequest.webhookId,
+                statusCode: response.statusCode,
+                ...response.metadata,
+                ...normalizedRequest.metadata,
+              }),
+            },
+          });
+          this.completedByIdempotencyKey.set(idempotencyKey, successResult);
+          return successResult;
+        }
+
+        lastFailure = response;
+        const isRetryable = Boolean(response.error?.retryable) || response.statusCode === 429;
+        if (!isRetryable) {
+          break;
+        }
+      } catch (error) {
+        lastFailureCause = error;
+      }
+    }
+
+    const failureCode = resolveFailureCode(lastFailure, lastFailureCause);
+    const failureMessage = lastFailure?.error?.message ?? parseFailureCause(lastFailureCause);
+    const permissionFailure = lastFailure ? isWebhookPermissionFailure(lastFailure) : false;
+    const verificationOutcome = permissionFailure
+      ? DiscordWebhookRemovalVerificationOutcome.PERMISSION_FAILURE
+      : failureCode === DiscordExecutionErrorCode.UNKNOWN_ERROR
+        ? DiscordWebhookRemovalVerificationOutcome.UNKNOWN_ERROR
+        : DiscordWebhookRemovalVerificationOutcome.FAILURE;
+    const retryable =
+      lastFailure?.error?.retryable ??
+      (failureCode === DiscordExecutionErrorCode.RATE_LIMITED ||
+        failureCode === DiscordExecutionErrorCode.NETWORK_ERROR);
+
+    return freezeExecutionResult({
+      status: DiscordExecutionStatus.FAILED,
+      executionTimeMs: Math.max(0, nowMs() - startedAt),
+      correlationId: normalizedRequest.correlationId,
+      metadata: {
+        operation: 'REMOVE_DANGEROUS_WEBHOOK',
+        idempotencyKey,
+        httpStatus: lastFailure?.statusCode ?? 0,
+        verification: {
+          outcome: verificationOutcome,
+        },
+        retry: {
+          bounded: true,
+          attemptCount,
+          maxAttempts: this.maxAttempts,
+          exhausted: true,
+        },
+        rateLimit: {
+          limited: failureCode === DiscordExecutionErrorCode.RATE_LIMITED,
+          retryAfterMs: lastFailure?.rateLimit?.retryAfterMs,
+          bucketId: lastFailure?.rateLimit?.bucketId,
+          global: lastFailure?.rateLimit?.global,
+        },
+        error: {
+          code: failureCode,
+          message: failureMessage,
+          retryable,
+          cause: lastFailureCause !== undefined ? parseFailureCause(lastFailureCause) : undefined,
+        },
+        metadata: Object.freeze({
+          guildId: normalizedRequest.guildId,
+          webhookId: normalizedRequest.webhookId,
+          statusCode: lastFailure?.statusCode,
+          ...lastFailure?.metadata,
+          ...normalizedRequest.metadata,
+        }),
+      },
+    });
+  }
+
+  async restoreWebhook(correlationId: string): Promise<DiscordExecutionResult> {
+    return unsupportedResult('webhook', 'restoreWebhook', correlationId);
+  }
+
+  async freezeWebhooks(request: string | DiscordWebhookRemovalExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
+    return unsupportedResult('webhook', 'freezeWebhooks', correlationId);
+  }
+}
+
+export class ProductionDiscordPermissionExecutionService {
+  private readonly completedByIdempotencyKey = new Map<string, DiscordExecutionResult>();
+  private readonly maxAttempts: number;
+
+  constructor(
+    private readonly operation: DiscordPermissionOverwriteOperation,
+    options: ProductionDiscordExecutionServiceOptions = {},
+  ) {
+    const merged = { ...DEFAULT_PRODUCTION_OPTIONS, ...options };
+    this.maxAttempts = Math.max(1, Math.floor(merged.maxAttempts));
+  }
+
+  async restorePermissionOverwrite(
+    request: string | DiscordPermissionOverwriteExecutionRequest,
+  ): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coercePermissionOverwriteRequest(request);
+    const idempotencyKey = resolvePermissionOverwriteIdempotencyKey(normalizedRequest);
+    const cached = this.completedByIdempotencyKey.get(idempotencyKey);
+    if (cached) {
+      const metadata = cached.metadata as FrozenExecutionMetadata | undefined;
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.SKIPPED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'RESTORE_PERMISSION_OVERWRITE',
+          idempotencyKey,
+          httpStatus: metadata?.httpStatus ?? 200,
+          verification: {
+            outcome: metadata?.verification?.outcome ?? DiscordPermissionOverwriteVerificationOutcome.SUCCESS,
+          },
+          duplicate: true,
+          retry: metadata?.retry ?? {
+            bounded: true,
+            attemptCount: 1,
+            maxAttempts: this.maxAttempts,
+            exhausted: false,
+          },
+          rateLimit: metadata?.rateLimit ?? { limited: false },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    if (!normalizedRequest.channelId || !normalizedRequest.overwriteId) {
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.FAILED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'RESTORE_PERMISSION_OVERWRITE',
+          idempotencyKey,
+          httpStatus: 0,
+          verification: { outcome: DiscordPermissionOverwriteVerificationOutcome.FAILURE },
+          retry: {
+            bounded: true,
+            attemptCount: 0,
+            maxAttempts: this.maxAttempts,
+            exhausted: true,
+          },
+          rateLimit: { limited: false },
+          error: {
+            code: DiscordExecutionErrorCode.VALIDATION_ERROR,
+            message: 'channelId and overwriteId are required for production execution',
+            retryable: false,
+          },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    let attemptCount = 0;
+    const startedAt = nowMs();
+    let lastFailure: DiscordPermissionOverwriteOperationResponse | undefined;
+    let lastFailureCause: unknown;
+
+    while (attemptCount < this.maxAttempts) {
+      attemptCount += 1;
+      try {
+        const response = await this.operation.restorePermissionOverwrite({
+          correlationId: normalizedRequest.correlationId,
+          channelId: normalizedRequest.channelId,
+          overwriteId: normalizedRequest.overwriteId,
+          guildId: normalizedRequest.guildId,
+          reason: normalizedRequest.reason,
+        });
+
+        if (response.ok || isPermissionOverwriteAlreadyRestored(response)) {
+          const verificationOutcome = isPermissionOverwriteAlreadyRestored(response)
+            ? DiscordPermissionOverwriteVerificationOutcome.ALREADY_RESTORED
+            : DiscordPermissionOverwriteVerificationOutcome.SUCCESS;
+
+          const successResult = freezeExecutionResult({
+            status: DiscordExecutionStatus.SUCCESS,
+            executionTimeMs: Math.max(0, nowMs() - startedAt),
+            correlationId: normalizedRequest.correlationId,
+            metadata: {
+              operation: 'RESTORE_PERMISSION_OVERWRITE',
+              idempotencyKey,
+              httpStatus: response.statusCode,
+              verification: {
+                outcome: verificationOutcome,
+              },
+              retry: {
+                bounded: true,
+                attemptCount,
+                maxAttempts: this.maxAttempts,
+                exhausted: false,
+              },
+              rateLimit: {
+                limited: false,
+                retryAfterMs: response.rateLimit?.retryAfterMs,
+                bucketId: response.rateLimit?.bucketId,
+                global: response.rateLimit?.global,
+              },
+              metadata: Object.freeze({
+                guildId: normalizedRequest.guildId,
+                channelId: normalizedRequest.channelId,
+                overwriteId: normalizedRequest.overwriteId,
+                statusCode: response.statusCode,
+                ...response.metadata,
+                ...normalizedRequest.metadata,
+              }),
+            },
+          });
+          this.completedByIdempotencyKey.set(idempotencyKey, successResult);
+          return successResult;
+        }
+
+        lastFailure = response;
+        const isRetryable = Boolean(response.error?.retryable) || response.statusCode === 429;
+        if (!isRetryable) {
+          break;
+        }
+      } catch (error) {
+        lastFailureCause = error;
+      }
+    }
+
+    const failureCode = resolveFailureCode(lastFailure, lastFailureCause);
+    const failureMessage = lastFailure?.error?.message ?? parseFailureCause(lastFailureCause);
+    const permissionFailure = lastFailure ? isPermissionOverwritePermissionFailure(lastFailure) : false;
+    const verificationOutcome = permissionFailure
+      ? DiscordPermissionOverwriteVerificationOutcome.PERMISSION_FAILURE
+      : failureCode === DiscordExecutionErrorCode.UNKNOWN_ERROR
+        ? DiscordPermissionOverwriteVerificationOutcome.UNKNOWN_ERROR
+        : DiscordPermissionOverwriteVerificationOutcome.FAILURE;
+    const retryable =
+      lastFailure?.error?.retryable ??
+      (failureCode === DiscordExecutionErrorCode.RATE_LIMITED ||
+        failureCode === DiscordExecutionErrorCode.NETWORK_ERROR);
+
+    return freezeExecutionResult({
+      status: DiscordExecutionStatus.FAILED,
+      executionTimeMs: Math.max(0, nowMs() - startedAt),
+      correlationId: normalizedRequest.correlationId,
+      metadata: {
+        operation: 'RESTORE_PERMISSION_OVERWRITE',
+        idempotencyKey,
+        httpStatus: lastFailure?.statusCode ?? 0,
+        verification: {
+          outcome: verificationOutcome,
+        },
+        retry: {
+          bounded: true,
+          attemptCount,
+          maxAttempts: this.maxAttempts,
+          exhausted: true,
+        },
+        rateLimit: {
+          limited: failureCode === DiscordExecutionErrorCode.RATE_LIMITED,
+          retryAfterMs: lastFailure?.rateLimit?.retryAfterMs,
+          bucketId: lastFailure?.rateLimit?.bucketId,
+          global: lastFailure?.rateLimit?.global,
+        },
+        error: {
+          code: failureCode,
+          message: failureMessage,
+          retryable,
+          cause: lastFailureCause !== undefined ? parseFailureCause(lastFailureCause) : undefined,
+        },
+        metadata: Object.freeze({
+          guildId: normalizedRequest.guildId,
+          channelId: normalizedRequest.channelId,
+          overwriteId: normalizedRequest.overwriteId,
+          statusCode: lastFailure?.statusCode,
+          ...lastFailure?.metadata,
+          ...normalizedRequest.metadata,
+        }),
+      },
+    });
+  }
+}
+
+export class ProductionDiscordChannelExecutionService implements ChannelExecutionService {
+  private readonly completedByIdempotencyKey = new Map<string, DiscordExecutionResult>();
+  private readonly maxAttempts: number;
+
+  constructor(
+    private readonly operation: DiscordChannelContainmentOperation,
+    private readonly permissionService: ProductionDiscordPermissionExecutionService,
+    options: ProductionDiscordExecutionServiceOptions = {},
+  ) {
+    const merged = { ...DEFAULT_PRODUCTION_OPTIONS, ...options };
+    this.maxAttempts = Math.max(1, Math.floor(merged.maxAttempts));
+  }
+
+  async lockChannel(request: string | DiscordChannelContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceChannelContainmentRequest(request);
+    const idempotencyKey = resolveChannelContainmentIdempotencyKey(normalizedRequest);
+    const cached = this.completedByIdempotencyKey.get(idempotencyKey);
+    if (cached) {
+      const metadata = cached.metadata as FrozenExecutionMetadata | undefined;
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.SKIPPED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'LOCK_CHANNELS',
+          idempotencyKey,
+          httpStatus: metadata?.httpStatus ?? 200,
+          verification: {
+            outcome: metadata?.verification?.outcome ?? DiscordChannelContainmentVerificationOutcome.SUCCESS,
+          },
+          duplicate: true,
+          retry: metadata?.retry ?? {
+            bounded: true,
+            attemptCount: 1,
+            maxAttempts: this.maxAttempts,
+            exhausted: false,
+          },
+          rateLimit: metadata?.rateLimit ?? { limited: false },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    if (!normalizedRequest.channelId) {
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.FAILED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'LOCK_CHANNELS',
+          idempotencyKey,
+          httpStatus: 0,
+          verification: { outcome: DiscordChannelContainmentVerificationOutcome.FAILURE },
+          retry: {
+            bounded: true,
+            attemptCount: 0,
+            maxAttempts: this.maxAttempts,
+            exhausted: true,
+          },
+          rateLimit: { limited: false },
+          error: {
+            code: DiscordExecutionErrorCode.VALIDATION_ERROR,
+            message: 'channelId is required for production execution',
+            retryable: false,
+          },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    let attemptCount = 0;
+    const startedAt = nowMs();
+    let lastFailure: DiscordChannelContainmentOperationResponse | undefined;
+    let lastFailureCause: unknown;
+
+    while (attemptCount < this.maxAttempts) {
+      attemptCount += 1;
+      try {
+        const response = await this.operation.containChannel({
+          correlationId: normalizedRequest.correlationId,
+          channelId: normalizedRequest.channelId,
+          guildId: normalizedRequest.guildId,
+          reason: normalizedRequest.reason,
+        });
+
+        if (response.ok || isChannelAlreadyContained(response)) {
+          const verificationOutcome = isChannelAlreadyContained(response)
+            ? DiscordChannelContainmentVerificationOutcome.ALREADY_CONTAINED
+            : DiscordChannelContainmentVerificationOutcome.SUCCESS;
+
+          const successResult = freezeExecutionResult({
+            status: DiscordExecutionStatus.SUCCESS,
+            executionTimeMs: Math.max(0, nowMs() - startedAt),
+            correlationId: normalizedRequest.correlationId,
+            metadata: {
+              operation: 'LOCK_CHANNELS',
+              idempotencyKey,
+              httpStatus: response.statusCode,
+              verification: {
+                outcome: verificationOutcome,
+              },
+              retry: {
+                bounded: true,
+                attemptCount,
+                maxAttempts: this.maxAttempts,
+                exhausted: false,
+              },
+              rateLimit: {
+                limited: false,
+                retryAfterMs: response.rateLimit?.retryAfterMs,
+                bucketId: response.rateLimit?.bucketId,
+                global: response.rateLimit?.global,
+              },
+              metadata: Object.freeze({
+                guildId: normalizedRequest.guildId,
+                channelId: normalizedRequest.channelId,
+                statusCode: response.statusCode,
+                ...response.metadata,
+                ...normalizedRequest.metadata,
+              }),
+            },
+          });
+          this.completedByIdempotencyKey.set(idempotencyKey, successResult);
+          return successResult;
+        }
+
+        lastFailure = response;
+        const isRetryable = Boolean(response.error?.retryable) || response.statusCode === 429;
+        if (!isRetryable) {
+          break;
+        }
+      } catch (error) {
+        lastFailureCause = error;
+      }
+    }
+
+    const failureCode = resolveFailureCode(lastFailure, lastFailureCause);
+    const failureMessage = lastFailure?.error?.message ?? parseFailureCause(lastFailureCause);
+    const permissionFailure = lastFailure ? isChannelPermissionFailure(lastFailure) : false;
+    const verificationOutcome = permissionFailure
+      ? DiscordChannelContainmentVerificationOutcome.PERMISSION_FAILURE
+      : failureCode === DiscordExecutionErrorCode.UNKNOWN_ERROR
+        ? DiscordChannelContainmentVerificationOutcome.UNKNOWN_ERROR
+        : DiscordChannelContainmentVerificationOutcome.FAILURE;
+    const retryable =
+      lastFailure?.error?.retryable ??
+      (failureCode === DiscordExecutionErrorCode.RATE_LIMITED ||
+        failureCode === DiscordExecutionErrorCode.NETWORK_ERROR);
+
+    return freezeExecutionResult({
+      status: DiscordExecutionStatus.FAILED,
+      executionTimeMs: Math.max(0, nowMs() - startedAt),
+      correlationId: normalizedRequest.correlationId,
+      metadata: {
+        operation: 'LOCK_CHANNELS',
+        idempotencyKey,
+        httpStatus: lastFailure?.statusCode ?? 0,
+        verification: {
+          outcome: verificationOutcome,
+        },
+        retry: {
+          bounded: true,
+          attemptCount,
+          maxAttempts: this.maxAttempts,
+          exhausted: true,
+        },
+        rateLimit: {
+          limited: failureCode === DiscordExecutionErrorCode.RATE_LIMITED,
+          retryAfterMs: lastFailure?.rateLimit?.retryAfterMs,
+          bucketId: lastFailure?.rateLimit?.bucketId,
+          global: lastFailure?.rateLimit?.global,
+        },
+        error: {
+          code: failureCode,
+          message: failureMessage,
+          retryable,
+          cause: lastFailureCause !== undefined ? parseFailureCause(lastFailureCause) : undefined,
+        },
+        metadata: Object.freeze({
+          guildId: normalizedRequest.guildId,
+          channelId: normalizedRequest.channelId,
+          statusCode: lastFailure?.statusCode,
+          ...lastFailure?.metadata,
+          ...normalizedRequest.metadata,
+        }),
+      },
+    });
+  }
+
+  async unlockChannel(correlationId: string): Promise<DiscordExecutionResult> {
+    return unsupportedResult('channel', 'unlockChannel', correlationId);
+  }
+
+  async restoreChannel(request: string | DiscordPermissionOverwriteExecutionRequest): Promise<DiscordExecutionResult> {
+    return this.permissionService.restorePermissionOverwrite(request);
+  }
+}
+
 export class ProductionDiscordExecutionService implements DiscordExecutionService {
   readonly member: MemberExecutionService = new UnsupportedMemberExecutionService();
-  readonly role: RoleExecutionService = new UnsupportedRoleExecutionService();
-  readonly channel: ChannelExecutionService = new UnsupportedChannelExecutionService();
-  readonly webhook: WebhookExecutionService = new UnsupportedWebhookExecutionService();
+  readonly role: RoleExecutionService;
+  readonly channel: ChannelExecutionService;
+  readonly webhook: WebhookExecutionService;
   readonly guild: GuildExecutionService = new UnsupportedGuildExecutionService();
   readonly emoji: EmojiExecutionService = new UnsupportedEmojiExecutionService();
   readonly vanity: VanityExecutionService = new UnsupportedVanityExecutionService();
   readonly integration: IntegrationExecutionService = new UnsupportedIntegrationExecutionService();
   readonly bot: BotExecutionService;
 
-  constructor(operation: DiscordBotRemovalOperation, options: ProductionDiscordExecutionServiceOptions = {}) {
-    this.bot = new ProductionDiscordBotExecutionService(operation, options);
+  constructor(
+    operationOrDependencies: DiscordBotRemovalOperation | ProductionDiscordExecutionServiceDependencies,
+    options: ProductionDiscordExecutionServiceOptions = {},
+  ) {
+    const dependencies: ProductionDiscordExecutionServiceDependencies =
+      typeof (operationOrDependencies as DiscordBotRemovalOperation).removeUnauthorizedBot === 'function'
+        ? { botRemovalOperation: operationOrDependencies as DiscordBotRemovalOperation }
+        : (operationOrDependencies as ProductionDiscordExecutionServiceDependencies);
+
+    this.bot = dependencies.botRemovalOperation
+      ? new ProductionDiscordBotExecutionService(dependencies.botRemovalOperation, options)
+      : new UnsupportedBotExecutionService();
+    this.role = dependencies.roleRemovalOperation
+      ? new ProductionDiscordRoleExecutionService(dependencies.roleRemovalOperation, options)
+      : new UnsupportedRoleExecutionService();
+    const permissionService = dependencies.permissionOverwriteOperation
+      ? new ProductionDiscordPermissionExecutionService(dependencies.permissionOverwriteOperation, options)
+      : undefined;
+    this.channel = dependencies.channelContainmentOperation && permissionService
+      ? new ProductionDiscordChannelExecutionService(dependencies.channelContainmentOperation, permissionService, options)
+      : new UnsupportedChannelExecutionService();
+    this.webhook = dependencies.webhookRemovalOperation
+      ? new ProductionDiscordWebhookExecutionService(dependencies.webhookRemovalOperation, options)
+      : new UnsupportedWebhookExecutionService();
   }
 }
 

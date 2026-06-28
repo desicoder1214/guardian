@@ -2,9 +2,14 @@ import { AuditAttributionConfidence } from '../../src/core/runtime/discord/audit
 import { DetectionConfidence, DetectionDisposition, DetectionSeverity } from '../../src/core/runtime/discord/detection-engine';
 import {
   DiscordBotRemovalOperation,
+  DiscordBotRemovalVerificationOutcome,
   DiscordExecutionStatus,
   ProductionDiscordExecutionService,
 } from '../../src/core/runtime/discord/discord-execution-service';
+import {
+  ProductionDiscordExecutionAdapter,
+  ProductionDiscordHttpClient,
+} from '../../src/core/runtime/discord/production-discord-execution-adapter';
 import { ActionExecutionStatus } from '../../src/core/runtime/discord/security-action-dispatcher';
 import {
   InMemorySecurityActionExecutorRegistry,
@@ -216,6 +221,29 @@ function buildIntegration(operation: DiscordBotRemovalOperation): InMemoryUnauth
   return new InMemoryUnauthorizedBotRemovalExecutionIntegration(botExecutor, authorizationEngine, router, dispatcher);
 }
 
+function buildIntegrationWithAdapter(client: ProductionDiscordHttpClient): InMemoryUnauthorizedBotRemovalExecutionIntegration {
+  const adapter = new ProductionDiscordExecutionAdapter({
+    httpClient: client,
+    botToken: 'test-token',
+    apiBaseUrl: 'https://discord.example',
+    apiVersion: 10,
+    maxAttempts: 2,
+  });
+  const botExecutor = new DiscordBotExecutor(adapter);
+
+  const routerRegistry = new InMemorySecurityDomainExecutorRegistry();
+  routerRegistry.register(botExecutor);
+
+  const actionRegistry = new InMemorySecurityActionExecutorRegistry();
+  actionRegistry.register(new RouterActionExecutorStub(SecurityActionType.REMOVE_UNAUTHORIZED_BOT));
+
+  const authorizationEngine = new InMemorySecurityExecutionAuthorizationEngine();
+  const router = new InMemorySecurityExecutionRouter(actionRegistry);
+  const dispatcher = new InMemorySecurityExecutionDispatcher(routerRegistry);
+
+  return new InMemoryUnauthorizedBotRemovalExecutionIntegration(botExecutor, authorizationEngine, router, dispatcher);
+}
+
 test('end-to-end integration executes only unauthorized bot removal and preserves correlation', async () => {
   let operationCallCount = 0;
   const integration = buildIntegration({
@@ -348,4 +376,53 @@ test('integration results are immutable', async () => {
   expect(() => {
     (result as { planId: string }).planId = 'mutated';
   }).toThrow(TypeError);
+});
+
+test('integration composes production adapter path and preserves endpoint + verification metadata', async () => {
+  const calls: Array<{ method: string; url: string }> = [];
+  const integration = buildIntegrationWithAdapter({
+    async request(request) {
+      calls.push({ method: request.method, url: request.url });
+
+      return Object.freeze({
+        ok: true,
+        status: 204,
+        statusText: 'No Content',
+        headers: Object.freeze({
+          get() {
+            return null;
+          },
+        }),
+      });
+    },
+  });
+
+  const result = await integration.execute(
+    Object.freeze({
+      executionPlan: buildExecutionPlan(),
+      hotPathPlan: buildHotPathPlan(),
+    }),
+  );
+
+  const botRecord = result.executionRecords.find((record) => record.result.capability === SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT);
+  expect(botRecord?.result.status).toBe(SecurityBotExecutionStatus.EXECUTED);
+  expect(botRecord?.result.correlationId).toBe('corr-bot-e2e');
+  expect(calls).toEqual([
+    {
+      method: 'DELETE',
+      url: 'https://discord.example/api/v10/guilds/guild-bot/members/bot-user-1',
+    },
+  ]);
+
+  const metadata = botRecord?.result.metadata as {
+    discordExecutionMetadata?: {
+      verification?: { outcome?: DiscordBotRemovalVerificationOutcome };
+      metadata?: { authorizationMetadata?: unknown; threatAssessment?: unknown; securityDecision?: unknown };
+    };
+  };
+  expect(metadata.discordExecutionMetadata?.verification?.outcome).toBe(DiscordBotRemovalVerificationOutcome.SUCCESS);
+  expect(metadata.discordExecutionMetadata?.metadata?.authorizationMetadata).toBeDefined();
+  expect(metadata.discordExecutionMetadata?.metadata?.securityDecision).toBeDefined();
+  const propagatedMetadata = metadata.discordExecutionMetadata?.metadata as Record<string, unknown>;
+  expect(Object.prototype.hasOwnProperty.call(propagatedMetadata, 'threatAssessment')).toBe(true);
 });

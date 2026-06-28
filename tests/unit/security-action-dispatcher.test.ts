@@ -64,10 +64,16 @@ function buildService(spy: { calls: string[] }): DiscordExecutionService {
       spy.calls.push('role.restoreRole');
       return result(correlationId, 'role.restoreRole');
     },
+    removeDangerousRole: async (request) => {
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
+      spy.calls.push('role.removeDangerousRole');
+      return result(correlationId, 'role.removeDangerousRole');
+    },
   };
 
   const channel: ChannelExecutionService = {
-    lockChannel: async (correlationId) => {
+    lockChannel: async (request) => {
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
       spy.calls.push('channel.lockChannel');
       return result(correlationId, 'channel.lockChannel');
     },
@@ -75,14 +81,16 @@ function buildService(spy: { calls: string[] }): DiscordExecutionService {
       spy.calls.push('channel.unlockChannel');
       return result(correlationId, 'channel.unlockChannel');
     },
-    restoreChannel: async (correlationId) => {
+    restoreChannel: async (request) => {
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
       spy.calls.push('channel.restoreChannel');
       return result(correlationId, 'channel.restoreChannel');
     },
   };
 
   const webhook: WebhookExecutionService = {
-    deleteWebhook: async (correlationId) => {
+    deleteWebhook: async (request) => {
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
       spy.calls.push('webhook.deleteWebhook');
       return result(correlationId, 'webhook.deleteWebhook');
     },
@@ -90,7 +98,8 @@ function buildService(spy: { calls: string[] }): DiscordExecutionService {
       spy.calls.push('webhook.restoreWebhook');
       return result(correlationId, 'webhook.restoreWebhook');
     },
-    freezeWebhooks: async (correlationId) => {
+    freezeWebhooks: async (request) => {
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
       spy.calls.push('webhook.freezeWebhooks');
       return result(correlationId, 'webhook.freezeWebhooks');
     },

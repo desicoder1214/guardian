@@ -293,3 +293,53 @@ test('verification outcomes include already-removed classification', async () =>
   const metadata = result.metadata as { verification: { outcome: DiscordBotRemovalVerificationOutcome } };
   expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.ALREADY_REMOVED);
 });
+
+test('validation failure is returned when required bot fields are missing', async () => {
+  const client: ProductionDiscordHttpClient = {
+    async request() {
+      return response({ status: 204 });
+    },
+  };
+
+  const adapter = createAdapter(client);
+  const result = await adapter.bot.removeUnauthorizedBot({
+    correlationId: 'corr-validation-bot-1',
+    guildId: 'guild-1',
+  });
+
+  expect(result.status).toBe(DiscordExecutionStatus.FAILED);
+  const metadata = result.metadata as {
+    verification: { outcome: DiscordBotRemovalVerificationOutcome };
+    error: { code: DiscordExecutionErrorCode };
+  };
+  expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.FAILURE);
+  expect(metadata.error.code).toBe(DiscordExecutionErrorCode.VALIDATION_ERROR);
+});
+
+test('unknown failure classification is surfaced when upstream returns UNKNOWN_ERROR', async () => {
+  const client: ProductionDiscordHttpClient = {
+    async request() {
+      return response({
+        ok: false,
+        status: 500,
+        statusText: 'Server Error',
+        json: async () => Object.freeze({ code: 'UNKNOWN_ERROR', message: 'unknown failure' }),
+      });
+    },
+  };
+
+  const adapter = createAdapter(client, { maxAttempts: 1 });
+  const result = await adapter.bot.removeUnauthorizedBot({
+    correlationId: 'corr-unknown-bot-1',
+    guildId: 'guild-1',
+    botUserId: 'bot-1',
+  });
+
+  expect(result.status).toBe(DiscordExecutionStatus.FAILED);
+  const metadata = result.metadata as {
+    verification: { outcome: DiscordBotRemovalVerificationOutcome };
+    error: { code: DiscordExecutionErrorCode };
+  };
+  expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.UNKNOWN_ERROR);
+  expect(metadata.error.code).toBe(DiscordExecutionErrorCode.UNKNOWN_ERROR);
+});

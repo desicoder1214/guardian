@@ -16,6 +16,22 @@ import {
   ProductionDiscordBotRemovalOperation,
   ProductionDiscordBotRemovalOperationOptions,
 } from './discord-bot-removal-operation';
+import {
+  ProductionDiscordRoleRemovalOperation,
+  ProductionDiscordRoleRemovalOperationOptions,
+} from './discord-role-removal-operation';
+import {
+  ProductionDiscordWebhookRemovalOperation,
+  ProductionDiscordWebhookRemovalOperationOptions,
+} from './discord-webhook-removal-operation';
+import {
+  ProductionDiscordChannelContainmentOperation,
+  ProductionDiscordChannelContainmentOperationOptions,
+} from './discord-channel-containment-operation';
+import {
+  ProductionDiscordPermissionOverwriteOperation,
+  ProductionDiscordPermissionOverwriteOperationOptions,
+} from './discord-permission-overwrite-operation';
 
 export interface ProductionDiscordHttpRequest {
   readonly method: string;
@@ -71,10 +87,105 @@ function toOperationOptions(
   });
 }
 
+function toRoleOperationOptions(
+  options: ProductionDiscordExecutionAdapterOptions,
+): ProductionDiscordRoleRemovalOperationOptions {
+  const fetchFn: NonNullable<ProductionDiscordRoleRemovalOperationOptions['fetchFn']> = (
+    input,
+    init,
+  ) =>
+    options.httpClient.request(
+      Object.freeze({
+        method: init.method,
+        url: input,
+        headers: Object.freeze({ ...init.headers }),
+      }),
+    );
+
+  return Object.freeze({
+    botToken: options.botToken,
+    apiBaseUrl: options.apiBaseUrl,
+    apiVersion: options.apiVersion,
+    userAgent: options.userAgent,
+    fetchFn,
+  });
+}
+
 function toServiceOptions(options: ProductionDiscordExecutionAdapterOptions): ProductionDiscordExecutionServiceOptions {
   return Object.freeze({
     maxAttempts: options.maxAttempts,
-    supportedOperation: 'REMOVE_UNAUTHORIZED_BOT',
+  });
+}
+
+function toWebhookOperationOptions(
+  options: ProductionDiscordExecutionAdapterOptions,
+): ProductionDiscordWebhookRemovalOperationOptions {
+  const fetchFn: NonNullable<ProductionDiscordWebhookRemovalOperationOptions['fetchFn']> = (
+    input,
+    init,
+  ) =>
+    options.httpClient.request(
+      Object.freeze({
+        method: init.method,
+        url: input,
+        headers: Object.freeze({ ...init.headers }),
+      }),
+    );
+
+  return Object.freeze({
+    botToken: options.botToken,
+    apiBaseUrl: options.apiBaseUrl,
+    apiVersion: options.apiVersion,
+    userAgent: options.userAgent,
+    fetchFn,
+  });
+}
+
+function toChannelContainmentOperationOptions(
+  options: ProductionDiscordExecutionAdapterOptions,
+): ProductionDiscordChannelContainmentOperationOptions {
+  const fetchFn: NonNullable<ProductionDiscordChannelContainmentOperationOptions['fetchFn']> = (
+    input,
+    init,
+  ) =>
+    options.httpClient.request(
+      Object.freeze({
+        method: init.method,
+        url: input,
+        headers: Object.freeze({ ...init.headers }),
+      }),
+    );
+
+  return Object.freeze({
+    botToken: options.botToken,
+    apiBaseUrl: options.apiBaseUrl,
+    apiVersion: options.apiVersion,
+    userAgent: options.userAgent,
+    fetchFn,
+  });
+}
+
+function toPermissionOverwriteOperationOptions(
+  options: ProductionDiscordExecutionAdapterOptions,
+): ProductionDiscordPermissionOverwriteOperationOptions {
+  const fetchFn: NonNullable<ProductionDiscordPermissionOverwriteOperationOptions['fetchFn']> = (
+    input,
+    init,
+  ) =>
+    options.httpClient.request(
+      Object.freeze({
+        method: init.method,
+        url: input,
+        headers: Object.freeze({ ...init.headers }),
+      }),
+    );
+
+  return Object.freeze({
+    botToken: options.botToken,
+    apiBaseUrl: options.apiBaseUrl,
+    apiVersion: options.apiVersion,
+    userAgent: options.userAgent,
+    fetchFn,
   });
 }
 
@@ -92,8 +203,25 @@ export class ProductionDiscordExecutionAdapter implements DiscordExecutionServic
   private readonly delegate: DiscordExecutionService;
 
   constructor(options: ProductionDiscordExecutionAdapterOptions) {
-    const operation = new ProductionDiscordBotRemovalOperation(toOperationOptions(options));
-    this.delegate = new ProductionDiscordExecutionService(operation, toServiceOptions(options));
+    const botOperation = new ProductionDiscordBotRemovalOperation(toOperationOptions(options));
+    const roleOperation = new ProductionDiscordRoleRemovalOperation(toRoleOperationOptions(options));
+    const webhookOperation = new ProductionDiscordWebhookRemovalOperation(toWebhookOperationOptions(options));
+    const channelContainmentOperation = new ProductionDiscordChannelContainmentOperation(
+      toChannelContainmentOperationOptions(options),
+    );
+    const permissionOverwriteOperation = new ProductionDiscordPermissionOverwriteOperation(
+      toPermissionOverwriteOperationOptions(options),
+    );
+    this.delegate = new ProductionDiscordExecutionService(
+      {
+        botRemovalOperation: botOperation,
+        roleRemovalOperation: roleOperation,
+        webhookRemovalOperation: webhookOperation,
+        channelContainmentOperation,
+        permissionOverwriteOperation,
+      },
+      toServiceOptions(options),
+    );
 
     this.member = this.delegate.member;
     this.role = this.delegate.role;

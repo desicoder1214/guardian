@@ -1,8 +1,8 @@
-import { SecurityBotExecutor } from './security-action-executor';
+import { SecurityRoleExecutor } from './security-action-executor';
 import {
-  DiscordBotRemovalExecutionRequest,
   DiscordExecutionService,
   DiscordExecutionStatus,
+  DiscordRoleRemovalExecutionRequest,
 } from './discord-execution-service';
 import {
   AuthorizationDecision,
@@ -13,16 +13,16 @@ import {
   SecurityExecutionRouteDecision,
 } from './security-execution-types';
 
-export enum SecurityBotExecutionStatus {
+export enum SecurityRoleExecutionStatus {
   EXECUTED = 'EXECUTED',
   REJECTED = 'REJECTED',
   SKIPPED_DUPLICATE = 'SKIPPED_DUPLICATE',
 }
 
-export interface SecurityBotExecutionResult {
-  readonly status: SecurityBotExecutionStatus;
-  readonly domain: SecurityExecutorDomain.BOT;
-  readonly capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT;
+export interface SecurityRoleExecutionResult {
+  readonly status: SecurityRoleExecutionStatus;
+  readonly domain: SecurityExecutorDomain.ROLE;
+  readonly capability: SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE;
   readonly correlationId: string;
   readonly planId: string;
   readonly executionPlanId: string;
@@ -33,7 +33,7 @@ function freezeMetadata(metadata?: Record<string, unknown>): Record<string, unkn
   return metadata ? Object.freeze({ ...metadata }) : undefined;
 }
 
-function freezeExecutionResult(result: SecurityBotExecutionResult): SecurityBotExecutionResult {
+function freezeExecutionResult(result: SecurityRoleExecutionResult): SecurityRoleExecutionResult {
   return Object.freeze({
     status: result.status,
     domain: result.domain,
@@ -86,11 +86,11 @@ function evaluateRequest(request: SecurityDomainExecutionRequest): {
   accepted: boolean;
   rejectionReason?: string;
 } {
-  if (request.domain !== SecurityExecutorDomain.BOT) {
+  if (request.domain !== SecurityExecutorDomain.ROLE) {
     return { accepted: false, rejectionReason: 'domain-mismatch' };
   }
 
-  if (request.capability !== SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT) {
+  if (request.capability !== SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE) {
     return { accepted: false, rejectionReason: 'unsupported-capability' };
   }
 
@@ -105,98 +105,25 @@ function evaluateRequest(request: SecurityDomainExecutionRequest): {
   return { accepted: true };
 }
 
-export class InMemorySecurityBotExecutor implements SecurityBotExecutor {
-  readonly executorId = 'in-memory-security-bot-executor';
-  readonly domain = SecurityExecutorDomain.BOT;
-  readonly supportedCapabilities = Object.freeze([SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT]);
-
-  private readonly processedRequestKeys = new Set<string>();
-
-  supports(capability: SecurityExecutorCapability): boolean {
-    return capability === SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT;
-  }
-
-  prepare(request: SecurityDomainExecutionRequest): SecurityDomainExecutionResult {
-    const evaluation = evaluateRequest(request);
-    if (!evaluation.accepted) {
-      return freezeDomainResult({
-        domain: SecurityExecutorDomain.BOT,
-        capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
-        accepted: false,
-        reason: 'INTENT_REJECTED',
-        metadata: Object.freeze({ reason: evaluation.rejectionReason }),
-      });
-    }
-
-    return freezeDomainResult({
-      domain: SecurityExecutorDomain.BOT,
-      capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
-      accepted: true,
-      reason: 'INTENT_ACCEPTED',
-      metadata: Object.freeze({ executorId: this.executorId }),
-    });
-  }
-
-  execute(request: SecurityDomainExecutionRequest): SecurityBotExecutionResult {
-    const prepared = this.prepare(request);
-    if (!prepared.accepted) {
-      return freezeExecutionResult({
-        status: SecurityBotExecutionStatus.REJECTED,
-        domain: SecurityExecutorDomain.BOT,
-        capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
-        correlationId: request.correlationId,
-        planId: request.planId,
-        executionPlanId: request.executionPlanId,
-        metadata: Object.freeze({ reason: prepared.metadata?.reason ?? 'intent-rejected' }),
-      });
-    }
-
-    const key = requestKey(request);
-    if (this.processedRequestKeys.has(key)) {
-      return freezeExecutionResult({
-        status: SecurityBotExecutionStatus.SKIPPED_DUPLICATE,
-        domain: SecurityExecutorDomain.BOT,
-        capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
-        correlationId: request.correlationId,
-        planId: request.planId,
-        executionPlanId: request.executionPlanId,
-        metadata: Object.freeze({ duplicate: true, idempotent: true }),
-      });
-    }
-
-    this.processedRequestKeys.add(key);
-
-    return freezeExecutionResult({
-      status: SecurityBotExecutionStatus.EXECUTED,
-      domain: SecurityExecutorDomain.BOT,
-      capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
-      correlationId: request.correlationId,
-      planId: request.planId,
-      executionPlanId: request.executionPlanId,
-      metadata: Object.freeze({ mode: 'in-memory', idempotent: true }),
-    });
-  }
-}
-
-export class DiscordBotExecutor implements SecurityBotExecutor {
-  readonly executorId = 'discord-security-bot-executor';
-  readonly domain = SecurityExecutorDomain.BOT;
-  readonly supportedCapabilities = Object.freeze([SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT]);
+export class DiscordRoleExecutor implements SecurityRoleExecutor {
+  readonly executorId = 'discord-security-role-executor';
+  readonly domain = SecurityExecutorDomain.ROLE;
+  readonly supportedCapabilities = Object.freeze([SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE]);
 
   private readonly processedRequestKeys = new Set<string>();
 
   constructor(private readonly discordExecutionService: DiscordExecutionService) {}
 
   supports(capability: SecurityExecutorCapability): boolean {
-    return capability === SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT;
+    return capability === SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE;
   }
 
   prepare(request: SecurityDomainExecutionRequest): SecurityDomainExecutionResult {
     const evaluation = evaluateRequest(request);
     if (!evaluation.accepted) {
       return freezeDomainResult({
-        domain: SecurityExecutorDomain.BOT,
-        capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
+        domain: SecurityExecutorDomain.ROLE,
+        capability: SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE,
         accepted: false,
         reason: 'INTENT_REJECTED',
         metadata: Object.freeze({ reason: evaluation.rejectionReason }),
@@ -204,15 +131,15 @@ export class DiscordBotExecutor implements SecurityBotExecutor {
     }
 
     return freezeDomainResult({
-      domain: SecurityExecutorDomain.BOT,
-      capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
+      domain: SecurityExecutorDomain.ROLE,
+      capability: SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE,
       accepted: true,
       reason: 'INTENT_ACCEPTED',
       metadata: Object.freeze({ executorId: this.executorId }),
     });
   }
 
-  private toDiscordExecutionRequest(request: SecurityDomainExecutionRequest, idempotencyKey: string): DiscordBotRemovalExecutionRequest {
+  private toDiscordExecutionRequest(request: SecurityDomainExecutionRequest, idempotencyKey: string): DiscordRoleRemovalExecutionRequest {
     const requestMetadata = readRecord(request.metadata);
     const containmentMetadata = readRecord(request.route.containmentTarget?.metadata);
     const threatAssessment = requestMetadata?.threatAssessment;
@@ -221,16 +148,20 @@ export class DiscordBotExecutor implements SecurityBotExecutor {
 
     const guildId =
       readString(requestMetadata, 'guildId', 'guild_id') ?? readString(containmentMetadata, 'guildId', 'guild_id');
-    const botUserId =
-      readString(requestMetadata, 'botUserId', 'bot_user_id', 'botId', 'bot_id') ??
-      readString(containmentMetadata, 'botUserId', 'bot_user_id', 'botId', 'bot_id');
+    const memberUserId =
+      readString(requestMetadata, 'memberUserId', 'member_user_id', 'memberId', 'member_id', 'targetUserId', 'target_user_id') ??
+      readString(containmentMetadata, 'memberUserId', 'member_user_id', 'memberId', 'member_id', 'targetUserId', 'target_user_id');
+    const roleId =
+      readString(requestMetadata, 'roleId', 'role_id', 'dangerousRoleId', 'dangerous_role_id') ??
+      readString(containmentMetadata, 'roleId', 'role_id', 'dangerousRoleId', 'dangerous_role_id');
 
     return Object.freeze({
       correlationId: request.correlationId,
       guildId,
-      botUserId,
+      memberUserId,
+      roleId,
       idempotencyKey,
-      reason: 'guardian:remove-unauthorized-bot',
+      reason: 'guardian:remove-dangerous-role',
       metadata: Object.freeze({
         planId: request.planId,
         executionPlanId: request.executionPlanId,
@@ -243,13 +174,13 @@ export class DiscordBotExecutor implements SecurityBotExecutor {
     });
   }
 
-  async execute(request: SecurityDomainExecutionRequest): Promise<SecurityBotExecutionResult> {
+  async execute(request: SecurityDomainExecutionRequest): Promise<SecurityRoleExecutionResult> {
     const prepared = this.prepare(request);
     if (!prepared.accepted) {
       return freezeExecutionResult({
-        status: SecurityBotExecutionStatus.REJECTED,
-        domain: SecurityExecutorDomain.BOT,
-        capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
+        status: SecurityRoleExecutionStatus.REJECTED,
+        domain: SecurityExecutorDomain.ROLE,
+        capability: SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE,
         correlationId: request.correlationId,
         planId: request.planId,
         executionPlanId: request.executionPlanId,
@@ -260,9 +191,9 @@ export class DiscordBotExecutor implements SecurityBotExecutor {
     const key = requestKey(request);
     if (this.processedRequestKeys.has(key)) {
       return freezeExecutionResult({
-        status: SecurityBotExecutionStatus.SKIPPED_DUPLICATE,
-        domain: SecurityExecutorDomain.BOT,
-        capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
+        status: SecurityRoleExecutionStatus.SKIPPED_DUPLICATE,
+        domain: SecurityExecutorDomain.ROLE,
+        capability: SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE,
         correlationId: request.correlationId,
         planId: request.planId,
         executionPlanId: request.executionPlanId,
@@ -270,14 +201,15 @@ export class DiscordBotExecutor implements SecurityBotExecutor {
       });
     }
 
-    const discordRequest = this.toDiscordExecutionRequest(request, key);
-    const execution = await this.discordExecutionService.bot.removeUnauthorizedBot(discordRequest);
+    const executionRequest = this.toDiscordExecutionRequest(request, key);
+    const execution = await this.discordExecutionService.role.removeDangerousRole(executionRequest);
+
     if (execution.status === DiscordExecutionStatus.SUCCESS) {
       this.processedRequestKeys.add(key);
       return freezeExecutionResult({
-        status: SecurityBotExecutionStatus.EXECUTED,
-        domain: SecurityExecutorDomain.BOT,
-        capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
+        status: SecurityRoleExecutionStatus.EXECUTED,
+        domain: SecurityExecutorDomain.ROLE,
+        capability: SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE,
         correlationId: request.correlationId,
         planId: request.planId,
         executionPlanId: request.executionPlanId,
@@ -294,9 +226,9 @@ export class DiscordBotExecutor implements SecurityBotExecutor {
     }
 
     return freezeExecutionResult({
-      status: SecurityBotExecutionStatus.REJECTED,
-      domain: SecurityExecutorDomain.BOT,
-      capability: SecurityExecutorCapability.REMOVE_UNAUTHORIZED_BOT,
+      status: SecurityRoleExecutionStatus.REJECTED,
+      domain: SecurityExecutorDomain.ROLE,
+      capability: SecurityExecutorCapability.REMOVE_DANGEROUS_ROLE,
       correlationId: request.correlationId,
       planId: request.planId,
       executionPlanId: request.executionPlanId,
