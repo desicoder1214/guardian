@@ -326,6 +326,82 @@ export interface SecurityExecutionAuthorizationEngine {
   authorize(context: AuthorizationEvaluationContext): SecurityExecutionAuthorizationResult;
 }
 
+export enum SecurityExecutionRouteDecision {
+  EXECUTABLE = 'EXECUTABLE',
+  DEFERRED = 'DEFERRED',
+  SKIPPED = 'SKIPPED',
+}
+
+export enum SecurityExecutionRouteReason {
+  AUTHORIZED_IMMEDIATE = 'AUTHORIZED_IMMEDIATE',
+  BACKGROUND_DEFERRED = 'BACKGROUND_DEFERRED',
+  AUTHORIZATION_DENIED = 'AUTHORIZATION_DENIED',
+  NO_EXECUTOR = 'NO_EXECUTOR',
+}
+
+export interface SecurityExecutionRoute {
+  readonly routeId: string;
+  readonly planId: string;
+  readonly executionPlanId: string;
+  readonly correlationId: string;
+  readonly actionType: SecurityActionType;
+  readonly sequence: number;
+  readonly lane: SecurityHotPathExecutionLane;
+  readonly decision: SecurityExecutionRouteDecision;
+  readonly reason: SecurityExecutionRouteReason;
+  readonly containmentTarget?: SecurityContainmentTarget;
+  readonly containmentStrategy?: SecurityContainmentStrategy;
+  readonly authorizationResult: SecurityExecutionAuthorizationResult;
+}
+
+export interface SecurityExecutionRoutingContext {
+  readonly hotPathPlan: SecurityHotPathPlan;
+  readonly authorizationResult: SecurityExecutionAuthorizationResult;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface SecurityExecutionRoutingResult {
+  readonly planId: string;
+  readonly executionPlanId: string;
+  readonly correlationId: string;
+  readonly authorizationResult: SecurityExecutionAuthorizationResult;
+  readonly routes: readonly SecurityExecutionRoute[];
+  readonly metadata: {
+    readonly source: 'in-memory-security-execution-router';
+    readonly executableRouteCount: number;
+    readonly deferredRouteCount: number;
+    readonly skippedRouteCount: number;
+    readonly ignoredNoneActionCount: number;
+  };
+}
+
+export interface SecurityExecutionRouter {
+  route(context: SecurityExecutionRoutingContext): SecurityExecutionRoutingResult;
+}
+
+export interface SecurityExecutionDispatchIntent {
+  readonly route: SecurityExecutionRoute;
+  readonly dispatchDecision: SecurityExecutionRouteDecision;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface SecurityExecutionDispatchResult {
+  readonly planId: string;
+  readonly executionPlanId: string;
+  readonly correlationId: string;
+  readonly intents: readonly SecurityExecutionDispatchIntent[];
+  readonly metadata: {
+    readonly source: 'in-memory-security-execution-dispatcher';
+    readonly executableIntentCount: number;
+    readonly deferredIntentCount: number;
+    readonly skippedIntentCount: number;
+  };
+}
+
+export interface SecurityExecutionDispatcher {
+  dispatch(routingResult: SecurityExecutionRoutingResult): SecurityExecutionDispatchResult;
+}
+
 export interface ExecutionScheduler {
   schedule(actions: readonly SecurityAction[]): readonly SecurityAction[];
   dispatch(context: ExecutionContext, orderedActions: readonly SecurityAction[]): Promise<readonly ActionExecutionResult[]>;
