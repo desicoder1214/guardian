@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  DiscordBotRemovalVerificationOutcome,
   DiscordExecutionErrorCode,
   DiscordExecutionStatus,
   DiscordBotRemovalOperation,
@@ -254,13 +255,79 @@ test('production service executes successful REMOVE_UNAUTHORIZED_BOT and records
   const metadata = result.metadata as {
     operation: string;
     idempotencyKey: string;
+    httpStatus: number;
+    verification: { outcome: DiscordBotRemovalVerificationOutcome };
     retry: { bounded: boolean; attemptCount: number; maxAttempts: number; exhausted: boolean };
     rateLimit: { limited: boolean };
   };
   expect(metadata.operation).toBe('REMOVE_UNAUTHORIZED_BOT');
   expect(metadata.idempotencyKey).toBe('idem-1');
+  expect(metadata.httpStatus).toBe(204);
+  expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.SUCCESS);
   expect(metadata.retry).toEqual({ bounded: true, attemptCount: 1, maxAttempts: 2, exhausted: false });
   expect(metadata.rateLimit.limited).toBe(false);
+});
+
+test('production service treats already-removed bot as verified success', async () => {
+  let callCount = 0;
+  const operation: DiscordBotRemovalOperation = {
+    async removeUnauthorizedBot() {
+      callCount += 1;
+      return Object.freeze({
+        ok: false,
+        statusCode: 404,
+        error: Object.freeze({ code: 'ALREADY_REMOVED', message: 'Unknown Member', retryable: false }),
+      });
+    },
+  };
+
+  const service = new ProductionDiscordExecutionService(operation, { maxAttempts: 2 });
+  const result = await service.bot.removeUnauthorizedBot({
+    correlationId: 'corr-prod-already-removed',
+    guildId: 'g-1',
+    botUserId: 'bot-1',
+    idempotencyKey: 'idem-already-removed',
+  });
+
+  expect(callCount).toBe(1);
+  expect(result.status).toBe(DiscordExecutionStatus.SUCCESS);
+  const metadata = result.metadata as {
+    httpStatus: number;
+    verification: { outcome: DiscordBotRemovalVerificationOutcome };
+  };
+  expect(metadata.httpStatus).toBe(404);
+  expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.ALREADY_REMOVED);
+});
+
+test('production service classifies permission failures with verified outcome and non-retryable error', async () => {
+  const operation: DiscordBotRemovalOperation = {
+    async removeUnauthorizedBot() {
+      return Object.freeze({
+        ok: false,
+        statusCode: 403,
+        error: Object.freeze({ code: 'PERMISSION_DENIED', message: 'Missing Permissions', retryable: false }),
+      });
+    },
+  };
+
+  const service = new ProductionDiscordExecutionService(operation, { maxAttempts: 2 });
+  const result = await service.bot.removeUnauthorizedBot({
+    correlationId: 'corr-prod-permission-failure',
+    guildId: 'g-1',
+    botUserId: 'bot-1',
+    idempotencyKey: 'idem-permission-failure',
+  });
+
+  expect(result.status).toBe(DiscordExecutionStatus.FAILED);
+  const metadata = result.metadata as {
+    httpStatus: number;
+    verification: { outcome: DiscordBotRemovalVerificationOutcome };
+    error: { code: DiscordExecutionErrorCode; retryable: boolean };
+  };
+  expect(metadata.httpStatus).toBe(403);
+  expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.PERMISSION_FAILURE);
+  expect(metadata.error.code).toBe(DiscordExecutionErrorCode.API_ERROR);
+  expect(metadata.error.retryable).toBe(false);
 });
 
 test('production service returns structured failure with bounded retry metadata', async () => {
@@ -290,10 +357,14 @@ test('production service returns structured failure with bounded retry metadata'
   expect(result.correlationId).toBe('corr-prod-failure');
 
   const metadata = result.metadata as {
+    httpStatus: number;
+    verification: { outcome: DiscordBotRemovalVerificationOutcome };
     retry: { bounded: boolean; attemptCount: number; maxAttempts: number; exhausted: boolean };
     rateLimit: { limited: boolean; retryAfterMs?: number; bucketId?: string };
     error: { code: DiscordExecutionErrorCode; message: string; retryable: boolean };
   };
+  expect(metadata.httpStatus).toBe(429);
+  expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.FAILURE);
   expect(metadata.retry).toEqual({ bounded: true, attemptCount: 2, maxAttempts: 2, exhausted: true });
   expect(metadata.rateLimit).toMatchObject({ limited: true, retryAfterMs: 250, bucketId: 'bucket-1' });
   expect(metadata.error.code).toBe(DiscordExecutionErrorCode.RATE_LIMITED);

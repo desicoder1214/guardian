@@ -41,6 +41,14 @@ export interface DiscordExecutionErrorMetadata {
   readonly cause?: string;
 }
 
+export enum DiscordBotRemovalVerificationOutcome {
+  SUCCESS = 'SUCCESS',
+  ALREADY_REMOVED = 'ALREADY_REMOVED',
+  PERMISSION_FAILURE = 'PERMISSION_FAILURE',
+  FAILURE = 'FAILURE',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+}
+
 export interface DiscordBotRemovalExecutionRequest {
   readonly correlationId: string;
   readonly guildId?: string;
@@ -146,6 +154,10 @@ export interface ProductionDiscordExecutionServiceOptions {
 interface FrozenBotExecutionMetadata {
   readonly operation: 'REMOVE_UNAUTHORIZED_BOT';
   readonly idempotencyKey: string;
+  readonly httpStatus: number;
+  readonly verification: {
+    readonly outcome: DiscordBotRemovalVerificationOutcome;
+  };
   readonly duplicate?: boolean;
   readonly retry: DiscordExecutionRetryMetadata;
   readonly rateLimit: DiscordExecutionRateLimitMetadata;
@@ -203,6 +215,8 @@ function freezeExecutionResult(result: DiscordExecutionResult): DiscordExecution
       ? Object.freeze({
           operation: metadataRecord.operation,
           idempotencyKey: metadataRecord.idempotencyKey,
+          httpStatus: metadataRecord.httpStatus,
+          verification: freezeVerification(metadataRecord.verification),
           duplicate: metadataRecord.duplicate,
           retry: freezeRetryMetadata(metadataRecord.retry),
           rateLimit: freezeRateLimitMetadata(metadataRecord.rateLimit),
@@ -211,6 +225,12 @@ function freezeExecutionResult(result: DiscordExecutionResult): DiscordExecution
         })
       : undefined,
   });
+}
+
+function freezeVerification(metadata: {
+  outcome: DiscordBotRemovalVerificationOutcome;
+}): { readonly outcome: DiscordBotRemovalVerificationOutcome } {
+  return Object.freeze({ outcome: metadata.outcome });
 }
 
 function nowMs(): number {
@@ -260,6 +280,10 @@ function resolveFailureCode(
   response: DiscordBotRemovalOperationResponse | undefined,
   failureCause: unknown,
 ): DiscordExecutionErrorCode {
+  if (response?.error?.code === 'UNKNOWN_ERROR') {
+    return DiscordExecutionErrorCode.UNKNOWN_ERROR;
+  }
+
   if (response) {
     return mapErrorCode(response);
   }
@@ -281,6 +305,18 @@ function parseFailureCause(cause: unknown): string {
   }
 
   return 'unknown-cause';
+}
+
+function isAlreadyRemoved(response: DiscordBotRemovalOperationResponse): boolean {
+  return (
+    response.statusCode === 404 ||
+    response.error?.code === 'ALREADY_REMOVED' ||
+    response.error?.code === 'UNKNOWN_MEMBER'
+  );
+}
+
+function isPermissionFailure(response: DiscordBotRemovalOperationResponse): boolean {
+  return response.statusCode === 403 || response.error?.code === 'PERMISSION_DENIED' || response.error?.code === 'MISSING_PERMISSIONS';
 }
 
 abstract class BaseInMemoryExecutionService {
@@ -513,6 +549,10 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
         metadata: {
           operation: 'REMOVE_UNAUTHORIZED_BOT',
           idempotencyKey,
+          httpStatus: metadata?.httpStatus ?? 200,
+          verification: {
+            outcome: metadata?.verification?.outcome ?? DiscordBotRemovalVerificationOutcome.SUCCESS,
+          },
           duplicate: true,
           retry: metadata?.retry ?? {
             bounded: true,
@@ -534,6 +574,8 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
         metadata: {
           operation: 'REMOVE_UNAUTHORIZED_BOT',
           idempotencyKey,
+          httpStatus: 0,
+          verification: { outcome: DiscordBotRemovalVerificationOutcome.FAILURE },
           retry: {
             bounded: true,
             attemptCount: 0,
@@ -566,7 +608,11 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
           reason: normalizedRequest.reason,
         });
 
-        if (response.ok) {
+        if (response.ok || isAlreadyRemoved(response)) {
+          const verificationOutcome = isAlreadyRemoved(response)
+            ? DiscordBotRemovalVerificationOutcome.ALREADY_REMOVED
+            : DiscordBotRemovalVerificationOutcome.SUCCESS;
+
           const successResult = freezeExecutionResult({
             status: DiscordExecutionStatus.SUCCESS,
             executionTimeMs: Math.max(0, nowMs() - startedAt),
@@ -574,6 +620,10 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
             metadata: {
               operation: 'REMOVE_UNAUTHORIZED_BOT',
               idempotencyKey,
+              httpStatus: response.statusCode,
+              verification: {
+                outcome: verificationOutcome,
+              },
               retry: {
                 bounded: true,
                 attemptCount,
@@ -609,6 +659,12 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
 
     const failureCode = resolveFailureCode(lastFailure, lastFailureCause);
     const failureMessage = lastFailure?.error?.message ?? parseFailureCause(lastFailureCause);
+    const permissionFailure = lastFailure ? isPermissionFailure(lastFailure) : false;
+    const verificationOutcome = permissionFailure
+      ? DiscordBotRemovalVerificationOutcome.PERMISSION_FAILURE
+      : failureCode === DiscordExecutionErrorCode.UNKNOWN_ERROR
+        ? DiscordBotRemovalVerificationOutcome.UNKNOWN_ERROR
+        : DiscordBotRemovalVerificationOutcome.FAILURE;
     const retryable =
       lastFailure?.error?.retryable ??
       (failureCode === DiscordExecutionErrorCode.RATE_LIMITED ||
@@ -621,6 +677,10 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
       metadata: {
         operation: 'REMOVE_UNAUTHORIZED_BOT',
         idempotencyKey,
+        httpStatus: lastFailure?.statusCode ?? 0,
+        verification: {
+          outcome: verificationOutcome,
+        },
         retry: {
           bounded: true,
           attemptCount,
@@ -639,7 +699,11 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
           retryable,
           cause: lastFailureCause !== undefined ? parseFailureCause(lastFailureCause) : undefined,
         },
-        metadata: normalizedRequest.metadata,
+        metadata: Object.freeze({
+          statusCode: lastFailure?.statusCode,
+          ...lastFailure?.metadata,
+          ...normalizedRequest.metadata,
+        }),
       },
     });
   }

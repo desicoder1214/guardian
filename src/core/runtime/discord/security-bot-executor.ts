@@ -215,6 +215,8 @@ export class DiscordBotExecutor implements SecurityBotExecutor {
   private toDiscordExecutionRequest(request: SecurityDomainExecutionRequest, idempotencyKey: string): DiscordBotRemovalExecutionRequest {
     const requestMetadata = readRecord(request.metadata);
     const containmentMetadata = readRecord(request.route.containmentTarget?.metadata);
+    const threatAssessment = requestMetadata?.threatAssessment;
+    const securityDecision = requestMetadata?.securityDecision;
 
     const guildId =
       readString(requestMetadata, 'guildId', 'guild_id') ?? readString(containmentMetadata, 'guildId', 'guild_id');
@@ -233,6 +235,8 @@ export class DiscordBotExecutor implements SecurityBotExecutor {
         executionPlanId: request.executionPlanId,
         routeId: request.route.routeId,
         source: this.executorId,
+        threatAssessment,
+        securityDecision,
       }),
     });
   }

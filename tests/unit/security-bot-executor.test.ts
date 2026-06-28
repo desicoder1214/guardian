@@ -195,6 +195,49 @@ test('idempotency prevents duplicate execution', async () => {
   expect(callCount).toBe(1);
 });
 
+test('executor preserves threat assessment and security decision metadata in execution payload', async () => {
+  let observedMetadata: Record<string, unknown> | undefined;
+  const discordExecutionService: DiscordExecutionService = {
+    member: {} as DiscordExecutionService['member'],
+    role: {} as DiscordExecutionService['role'],
+    channel: {} as DiscordExecutionService['channel'],
+    webhook: {} as DiscordExecutionService['webhook'],
+    guild: {} as DiscordExecutionService['guild'],
+    emoji: {} as DiscordExecutionService['emoji'],
+    vanity: {} as DiscordExecutionService['vanity'],
+    integration: {} as DiscordExecutionService['integration'],
+    bot: {
+      async removeUnauthorizedBot(request) {
+        if (typeof request !== 'string') {
+          observedMetadata = request.metadata;
+        }
+
+        return Object.freeze({
+          status: DiscordExecutionStatus.SUCCESS,
+          executionTimeMs: 0,
+          correlationId: typeof request === 'string' ? request : request.correlationId,
+        });
+      },
+    },
+  };
+
+  const executor = new DiscordBotExecutor(discordExecutionService);
+  const result = await executor.execute(
+    buildRequest({
+      metadata: Object.freeze({
+        source: 'security-bot-executor-test',
+        threatAssessment: Object.freeze({ rationale: 'high-risk unauthorized bot add' }),
+        securityDecision: Object.freeze({ decision: 'BLOCK' }),
+      }),
+    }),
+  );
+
+  expect(result.status).toBe(SecurityBotExecutionStatus.EXECUTED);
+  expect(observedMetadata).toBeDefined();
+  expect(observedMetadata?.threatAssessment).toEqual({ rationale: 'high-risk unauthorized bot add' });
+  expect(observedMetadata?.securityDecision).toEqual({ decision: 'BLOCK' });
+});
+
 test('bot executor source contains no planning or policy logic', () => {
   const source = readSource();
 
