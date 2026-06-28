@@ -1,5 +1,6 @@
 import { DiscordGatewayNormalizedEvent } from './pipeline-types';
 import { SecurityActionType as SecurityPolicyActionType } from './security-policy-types';
+import { createDetectorExecutionPlan, DetectorPluginRegistry, InMemoryDetectorPluginRegistry } from './detection-plugin-framework';
 
 export enum DetectionSeverity {
   INFO = 'INFO',
@@ -58,26 +59,17 @@ export interface SecurityDetector {
 }
 
 export interface DetectionEngine {
-  evaluate(context: DetectionContext, detectors: readonly SecurityDetector[]): Promise<readonly DetectionResult[]>;
+  evaluate(context: DetectionContext): Promise<readonly DetectionResult[]>;
 }
 
 export class InMemoryDetectionEngine implements DetectionEngine {
-  async evaluate(context: DetectionContext, detectors: readonly SecurityDetector[]): Promise<readonly DetectionResult[]> {
-    const orderedDetectors = this.orderDetectors(detectors);
+  constructor(private readonly registry: DetectorPluginRegistry = new InMemoryDetectorPluginRegistry()) {}
+
+  async evaluate(context: DetectionContext): Promise<readonly DetectionResult[]> {
+    const executionPlan = createDetectorExecutionPlan(context, this.registry);
     const results: DetectionResult[] = [];
-    const executedDetectorIds = new Set<string>();
 
-    for (const detector of orderedDetectors) {
-      if (executedDetectorIds.has(detector.detectorId)) {
-        continue;
-      }
-
-      if (!detector.supportedActionTypes.includes(context.actionType)) {
-        continue;
-      }
-
-      executedDetectorIds.add(detector.detectorId);
-
+    for (const detector of executionPlan.plugins) {
       try {
         const result = await detector.evaluate(context);
         results.push(this.freezeResult(result));
@@ -111,10 +103,6 @@ export class InMemoryDetectionEngine implements DetectionEngine {
     }
 
     return Object.freeze(results);
-  }
-
-  private orderDetectors(detectors: readonly SecurityDetector[]): readonly SecurityDetector[] {
-    return [...detectors].sort((left, right) => left.detectorId.localeCompare(right.detectorId));
   }
 
   private freezeResult(result: DetectionResult): DetectionResult {

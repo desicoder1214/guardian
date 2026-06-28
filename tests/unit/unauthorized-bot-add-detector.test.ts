@@ -1,98 +1,15 @@
-import { AuditAttributionConfidence } from '../../src/core/runtime/discord/audit-attribution-types';
-import { InMemoryDetectorPipeline } from '../../src/core/runtime/discord/generic-detector-pipeline';
-import { InMemoryDetectorRegistry } from '../../src/core/runtime/discord/generic-detector-registry';
+import { InMemoryDetectionEngine } from '../../src/core/runtime/discord/detection-engine';
+import { InMemoryDetectorPluginRegistry } from '../../src/core/runtime/discord/detection-plugin-framework';
 import { DiscordGatewayNormalizedEvent } from '../../src/core/runtime/discord/pipeline-types';
-import { SecurityActionDispatcher } from '../../src/core/runtime/discord/security-action-dispatcher';
-import {
-  SecurityActionPlan,
-  SecurityActionPlanner,
-  SecurityActionPriority,
-  SecurityActionType as PlannedActionType,
-} from '../../src/core/runtime/discord/security-action-planner';
-import { SecurityDecisionReason, SecurityDecisionModel } from '../../src/core/runtime/discord/security-decision-types';
-import { InMemorySecurityDetectionForwarder } from '../../src/core/runtime/discord/security-detection-forwarder';
-import { SecurityEvaluationPipeline } from '../../src/core/runtime/discord/security-evaluation-pipeline';
-import { SecurityActionType, SecurityDecision } from '../../src/core/runtime/discord/security-policy-types';
+import { SecurityActionType } from '../../src/core/runtime/discord/security-policy-types';
 import { UnauthorizedBotAddDetector } from '../../src/core/runtime/discord/unauthorized-bot-add-detector';
 
-class RecordingSecurityEvaluationPipeline implements SecurityEvaluationPipeline {
-  readonly calls: Array<{ normalizedEvent: DiscordGatewayNormalizedEvent; actorId: string; actionType: SecurityActionType }> = [];
-
-  async evaluate(
-    normalizedEvent: DiscordGatewayNormalizedEvent,
-    actorId: string,
-    actionType: SecurityActionType,
-  ): Promise<SecurityDecisionModel> {
-    this.calls.push({ normalizedEvent, actorId, actionType });
-
-    return {
-      decision: SecurityDecision.INVESTIGATE,
-      reason: SecurityDecisionReason.ATTRIBUTION_LOW_CONFIDENCE,
-      confidence: AuditAttributionConfidence.MEDIUM,
-      actorId,
-      guildId: 'guild-1',
-      actionType,
-      correlationId: normalizedEvent.correlationId,
-    };
-  }
-}
-
-class RecordingSecurityActionPlanner implements SecurityActionPlanner {
-  readonly calls: SecurityDecisionModel[] = [];
-
-  plan(decisionModel: SecurityDecisionModel): SecurityActionPlan {
-    this.calls.push(decisionModel);
-
-    return {
-      decision: decisionModel.decision,
-      correlationId: decisionModel.correlationId,
-      actions: [
-        {
-          type: PlannedActionType.CREATE_INCIDENT,
-          priority: SecurityActionPriority.NORMAL,
-          sequence: 1,
-          metadata: { test: true },
-        },
-      ],
-    };
-  }
-}
-
-class RecordingSecurityActionDispatcher implements SecurityActionDispatcher {
-  readonly calls: SecurityActionPlan[] = [];
-
-  async dispatch(plan: SecurityActionPlan) {
-    this.calls.push(plan);
-
-    return {
-      correlationId: plan.correlationId,
-      results: [],
-    };
-  }
-}
-
 function buildEvent(overrides: Partial<DiscordGatewayNormalizedEvent> = {}): DiscordGatewayNormalizedEvent {
-  return {
-    eventName: 'BOT_ADD',
-    source: 'discord-gateway',
-    timestamp: '2026-01-01T00:00:00.000Z',
-    correlationId: 'corr-bot-add-1',
-    payload: {
-      guildId: 'guild-1',
-      actorId: 'actor-1',
-      botId: 'bot-1',
-      authorized: false,
-    },
-    ...overrides,
-  };
-}
-
-function buildGuildMemberAddEvent(overrides: Partial<DiscordGatewayNormalizedEvent> = {}): DiscordGatewayNormalizedEvent {
   return {
     eventName: 'GUILD_MEMBER_ADD',
     source: 'discord-gateway',
     timestamp: '2026-01-01T00:00:00.000Z',
-    correlationId: 'corr-member-add-1',
+    correlationId: 'corr-bot-add-1',
     payload: {
       guildId: 'guild-1',
       actorId: 'actor-1',
@@ -105,200 +22,128 @@ function buildGuildMemberAddEvent(overrides: Partial<DiscordGatewayNormalizedEve
   };
 }
 
-test('supported BOT_ADD event is recognized and emits DetectionResult', async () => {
-  const detector = new UnauthorizedBotAddDetector();
-  const result = await detector.detect(buildEvent());
+function buildContext(overrides: Partial<Parameters<UnauthorizedBotAddDetector['evaluate']>[0]> = {}) {
+  const normalizedEvent = buildEvent();
 
-  expect(detector.supports('BOT_ADD')).toBe(true);
+  return {
+    normalizedEvent,
+    actorId: 'actor-1',
+    guildId: 'guild-1',
+    actionType: SecurityActionType.BOT_ADD,
+    correlationId: normalizedEvent.correlationId,
+    timestamp: normalizedEvent.timestamp,
+    metadata: Object.freeze({
+      authorizedBotIds: Object.freeze([]),
+      trustedBotIds: Object.freeze([]),
+    }),
+    ...overrides,
+  };
+}
+
+test('authorized bot add produces CLEAN finding', async () => {
+  const detector = new UnauthorizedBotAddDetector();
+
+  const result = await detector.evaluate(
+    buildContext({
+      metadata: Object.freeze({
+        authorizedBotIds: Object.freeze(['bot-1']),
+        trustedBotIds: Object.freeze([]),
+      }),
+    }),
+  );
+
   expect(result.detectorId).toBe('unauthorized-bot-add-detector');
-  expect(result.detectorName).toBe('UnauthorizedBotAddDetector');
-  expect(result.eventType).toBe('BOT_ADD');
-  expect(result.detected).toBe(true);
+  expect(result.matched).toBe(false);
+  expect(result.findings).toHaveLength(1);
+  expect(result.findings[0]?.disposition).toBe('CLEAN');
   expect(result.correlationId).toBe('corr-bot-add-1');
 });
 
-test('GUILD_MEMBER_ADD with bot payload maps to unauthorized bot detection', async () => {
-  const detector = new UnauthorizedBotAddDetector();
-  const result = await detector.detect(buildGuildMemberAddEvent());
-
-  expect(detector.supports('GUILD_MEMBER_ADD')).toBe(true);
-  expect(result.eventType).toBe('GUILD_MEMBER_ADD');
-  expect(result.detected).toBe(true);
-});
-
-test('non-bot GUILD_MEMBER_ADD is ignored', async () => {
-  const detector = new UnauthorizedBotAddDetector();
-  const result = await detector.detect(
-    buildGuildMemberAddEvent({
-      payload: {
-        guildId: 'guild-1',
-        actorId: 'actor-1',
-        user: {
-          id: 'user-1',
-          bot: false,
-        },
-      },
-    }),
-  );
-
-  expect(result.detected).toBe(false);
-});
-
-test('authorized or trusted or allowlisted bot add is ignored', async () => {
+test('unauthorized bot add produces MALICIOUS finding', async () => {
   const detector = new UnauthorizedBotAddDetector();
 
-  const authorizedResult = await detector.detect(
-    buildEvent({
-      payload: {
-        guildId: 'guild-1',
-        actorId: 'actor-1',
-        botId: 'bot-1',
-        authorized: true,
-      },
-    }),
-  );
+  const result = await detector.evaluate(buildContext());
 
-  const trustedResult = await detector.detect(
-    buildGuildMemberAddEvent({
-      payload: {
-        guildId: 'guild-1',
-        actorId: 'actor-1',
-        user: {
-          id: 'bot-2',
-          bot: true,
-        },
-        trusted: true,
-      },
-    }),
-  );
-
-  const allowlistedResult = await detector.detect(
-    buildGuildMemberAddEvent({
-      payload: {
-        guildId: 'guild-1',
-        actorId: 'actor-1',
-        user: {
-          id: 'bot-3',
-          bot: true,
-        },
-        allowlisted: true,
-      },
-    }),
-  );
-
-  expect(authorizedResult.detected).toBe(false);
-  expect(trustedResult.detected).toBe(false);
-  expect(allowlistedResult.detected).toBe(false);
+  expect(result.matched).toBe(true);
+  expect(result.findings).toHaveLength(1);
+  expect(result.findings[0]?.disposition).toBe('MALICIOUS');
+  expect(result.findings[0]?.reason).toBe('Bot bot-1 is not authorized for addition');
 });
 
-test('missing authorization signal defaults to detection for bot add events', async () => {
+test('detection result is immutable', async () => {
   const detector = new UnauthorizedBotAddDetector();
-  const result = await detector.detect(
-    buildGuildMemberAddEvent({
-      payload: {
-        guildId: 'guild-1',
-        actorId: 'actor-1',
-        user: {
-          id: 'bot-4',
-          bot: true,
-        },
-      },
+  const result = await detector.evaluate(buildContext());
+
+  expect(Object.isFrozen(result)).toBe(true);
+  expect(Object.isFrozen(result.findings)).toBe(true);
+  expect(Object.isFrozen(result.findings[0] ?? {})).toBe(true);
+
+  expect(() => {
+    (result as { matched: boolean }).matched = false;
+  }).toThrow(TypeError);
+
+  expect(() => {
+    (result.findings as unknown as unknown[]).push('mutated');
+  }).toThrow(TypeError);
+});
+
+test('detector output is deterministic', async () => {
+  const detector = new UnauthorizedBotAddDetector();
+  const context = buildContext();
+
+  const first = await detector.evaluate(context);
+  const second = await detector.evaluate(context);
+
+  expect(second).toEqual(first);
+});
+
+test('correlationId is preserved', async () => {
+  const detector = new UnauthorizedBotAddDetector();
+  const result = await detector.evaluate(
+    buildContext({
+      correlationId: 'corr-bot-add-9',
+      normalizedEvent: buildEvent({ correlationId: 'corr-bot-add-9' }),
     }),
   );
 
-  expect(result.detected).toBe(true);
+  expect(result.correlationId).toBe('corr-bot-add-9');
+  expect(result.findings[0]?.correlationId).toBe('corr-bot-add-9');
 });
 
-test('unsupported events are ignored by the detector pipeline', async () => {
-  const registry = new InMemoryDetectorRegistry();
-  const evaluationPipeline = new RecordingSecurityEvaluationPipeline();
-  const planner = new RecordingSecurityActionPlanner();
-  const dispatcher = new RecordingSecurityActionDispatcher();
-  const forwarder = new InMemorySecurityDetectionForwarder(evaluationPipeline, planner, dispatcher);
+test('plugin registration works', () => {
+  const registry = new InMemoryDetectorPluginRegistry();
+  const detector = new UnauthorizedBotAddDetector();
 
-  registry.register(new UnauthorizedBotAddDetector());
+  registry.register(detector);
 
-  const pipeline = new InMemoryDetectorPipeline(registry, forwarder);
-  const results = await pipeline.execute(buildEvent({ eventName: 'CHANNEL_DELETE' }));
-
-  expect(results).toEqual([]);
-  expect(evaluationPipeline.calls).toEqual([]);
-  expect(planner.calls).toEqual([]);
-  expect(dispatcher.calls).toEqual([]);
+  expect(registry.getPlugin(detector.detectorId)).toBe(detector);
+  expect(registry.getPlugins().map((plugin) => plugin.detectorId)).toEqual(['unauthorized-bot-add-detector']);
 });
 
-test('positive BOT_ADD detection invokes security evaluation pipeline and preserves correlationId', async () => {
-  const registry = new InMemoryDetectorRegistry();
-  const evaluationPipeline = new RecordingSecurityEvaluationPipeline();
-  const planner = new RecordingSecurityActionPlanner();
-  const dispatcher = new RecordingSecurityActionDispatcher();
-  const forwarder = new InMemorySecurityDetectionForwarder(evaluationPipeline, planner, dispatcher);
+test('detection engine executes unauthorized bot detector once', async () => {
+  const registry = new InMemoryDetectorPluginRegistry();
+  const detector = new UnauthorizedBotAddDetector();
+  const evaluateSpy = jest.spyOn(detector, 'evaluate');
+  registry.register(detector);
 
-  registry.register(new UnauthorizedBotAddDetector());
+  const engine = new InMemoryDetectionEngine(registry);
+  const results = await engine.evaluate(buildContext());
 
-  const pipeline = new InMemoryDetectorPipeline(registry, forwarder);
-  const results = await pipeline.execute(buildEvent({ correlationId: 'corr-bot-add-9' }));
-
+  expect(evaluateSpy).toHaveBeenCalledTimes(1);
   expect(results).toHaveLength(1);
-  expect(results[0].detected).toBe(true);
-  expect(results[0].correlationId).toBe('corr-bot-add-9');
-
-  expect(evaluationPipeline.calls).toHaveLength(1);
-  expect(evaluationPipeline.calls[0].actionType).toBe(SecurityActionType.BOT_ADD);
-  expect(evaluationPipeline.calls[0].actorId).toBe('actor-1');
-  expect(evaluationPipeline.calls[0].normalizedEvent.correlationId).toBe('corr-bot-add-9');
-
-  expect(planner.calls).toHaveLength(1);
-  expect(planner.calls[0].correlationId).toBe('corr-bot-add-9');
-
-  expect(dispatcher.calls).toHaveLength(1);
-  expect(dispatcher.calls[0].correlationId).toBe('corr-bot-add-9');
+  expect(results[0]?.detectorId).toBe('unauthorized-bot-add-detector');
 });
 
-test('GUILD_MEMBER_ADD bot detection forwards to evaluation, planner, and dispatcher with correlationId preserved end-to-end', async () => {
-  const registry = new InMemoryDetectorRegistry();
-  const evaluationPipeline = new RecordingSecurityEvaluationPipeline();
-  const planner = new RecordingSecurityActionPlanner();
-  const dispatcher = new RecordingSecurityActionDispatcher();
-  const forwarder = new InMemorySecurityDetectionForwarder(evaluationPipeline, planner, dispatcher);
-
-  registry.register(new UnauthorizedBotAddDetector());
-
-  const pipeline = new InMemoryDetectorPipeline(registry, forwarder);
-  const results = await pipeline.execute(buildGuildMemberAddEvent({ correlationId: 'corr-member-add-9' }));
-
-  expect(results).toHaveLength(1);
-  expect(results[0].detected).toBe(true);
-  expect(results[0].correlationId).toBe('corr-member-add-9');
-
-  expect(evaluationPipeline.calls).toHaveLength(1);
-  expect(evaluationPipeline.calls[0].actionType).toBe(SecurityActionType.BOT_ADD);
-  expect(evaluationPipeline.calls[0].normalizedEvent.correlationId).toBe('corr-member-add-9');
-
-  expect(planner.calls).toHaveLength(1);
-  expect(planner.calls[0].correlationId).toBe('corr-member-add-9');
-
-  expect(dispatcher.calls).toHaveLength(1);
-  expect(dispatcher.calls[0].correlationId).toBe('corr-member-add-9');
-});
-
-test('detector and forwarding path perform no side effects or HTTP calls', async () => {
+test('legacy detector wrapper remains side-effect free', async () => {
   const previousFetch = (globalThis as { fetch?: unknown }).fetch;
   const fetchMock = jest.fn();
   (globalThis as { fetch?: unknown }).fetch = fetchMock;
 
   try {
-    const registry = new InMemoryDetectorRegistry();
-    const evaluationPipeline = new RecordingSecurityEvaluationPipeline();
-    const planner = new RecordingSecurityActionPlanner();
-    const dispatcher = new RecordingSecurityActionDispatcher();
-    const forwarder = new InMemorySecurityDetectionForwarder(evaluationPipeline, planner, dispatcher);
+    const detector = new UnauthorizedBotAddDetector();
+    const result = await detector.detect(buildEvent());
 
-    registry.register(new UnauthorizedBotAddDetector());
-
-    const pipeline = new InMemoryDetectorPipeline(registry, forwarder);
-    await pipeline.execute(buildEvent());
-
+    expect(result.detectorId).toBe('unauthorized-bot-add-detector');
     expect(fetchMock).not.toHaveBeenCalled();
   } finally {
     (globalThis as { fetch?: unknown }).fetch = previousFetch;

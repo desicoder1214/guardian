@@ -7,12 +7,24 @@ import {
   RemoveUnauthorizedBotExecutor,
 } from '../../src/core/runtime/discord/mock-production-executors';
 import { DiscordGatewayNormalizedEvent } from '../../src/core/runtime/discord/pipeline-types';
+import {
+  DetectionConfidence,
+  DetectionDisposition,
+  DetectionEngine,
+  DetectionResult,
+  DetectionSeverity,
+  InMemoryDetectionEngine,
+} from '../../src/core/runtime/discord/detection-engine';
+import { DetectorPlugin, InMemoryDetectorPluginRegistry } from '../../src/core/runtime/discord/detection-plugin-framework';
 import { InMemoryUnsupportedExecutor } from '../../src/core/runtime/discord/security-action-executor';
-import { InMemorySecurityActionPlanner, SecurityActionType } from '../../src/core/runtime/discord/security-action-planner';
+import { InMemorySecurityActionPlanner, SecurityAction, SecurityActionType } from '../../src/core/runtime/discord/security-action-planner';
 import { SecurityDecisionModel, SecurityDecisionReason } from '../../src/core/runtime/discord/security-decision-types';
-import { SecurityEvaluationPipeline } from '../../src/core/runtime/discord/security-evaluation-pipeline';
+import {
+  DetectionAwareSecurityEvaluationPipeline,
+  SecurityEvaluationPipeline,
+} from '../../src/core/runtime/discord/security-evaluation-pipeline';
 import { InMemorySecurityActionExecutorRegistry } from '../../src/core/runtime/discord/security-executor-registry';
-import { ExecutionState } from '../../src/core/runtime/discord/security-execution-types';
+import { ActionExecutionResult, ExecutionContext, ExecutionState } from '../../src/core/runtime/discord/security-execution-types';
 import {
   ExecutionAuthorizationPolicy,
   InMemoryExecutionAuthorizationEngine,
@@ -73,6 +85,80 @@ class FixedDecisionEvaluationPipeline implements SecurityEvaluationPipeline {
   }
 }
 
+class RecordingDetectionAwareEvaluationPipeline implements DetectionAwareSecurityEvaluationPipeline {
+  readonly callOrder: string[] = [];
+  stagedDetectionResults: readonly DetectionResult[] = Object.freeze([]);
+
+  async evaluate(
+    normalizedEvent: DiscordGatewayNormalizedEvent,
+    actorId: string,
+    actionType: SecurityPolicyActionType,
+  ): Promise<SecurityDecisionModel> {
+    this.callOrder.push('evaluate');
+
+    return {
+      decision: SecurityDecision.ALLOW,
+      reason: SecurityDecisionReason.POLICY_ALLOW,
+      confidence: AuditAttributionConfidence.HIGH,
+      actorId,
+      guildId: 'guild-1',
+      actionType,
+      correlationId: normalizedEvent.correlationId,
+      auditLogCorrelationId: 'audit-1',
+      metadata: Object.freeze({ detectionResults: this.stagedDetectionResults }),
+    };
+  }
+
+  stageDetectionResults(detectionResults: readonly DetectionResult[]): void {
+    this.callOrder.push('stageDetectionResults');
+    this.stagedDetectionResults = detectionResults;
+  }
+}
+
+class RecordingRemoveUnauthorizedBotExecutor extends RemoveUnauthorizedBotExecutor {
+  constructor(private readonly callOrder: string[]) {
+    super();
+  }
+
+  async execute(context: ExecutionContext, action: SecurityAction): Promise<ActionExecutionResult> {
+    this.callOrder.push(this.executorId);
+    return super.execute(context, action);
+  }
+}
+
+class RecordingFreezeWebhooksExecutor extends FreezeWebhooksExecutor {
+  constructor(private readonly callOrder: string[]) {
+    super();
+  }
+
+  async execute(context: ExecutionContext, action: SecurityAction): Promise<ActionExecutionResult> {
+    this.callOrder.push(this.executorId);
+    return super.execute(context, action);
+  }
+}
+
+class RecordingCreateIncidentExecutor extends CreateIncidentExecutor {
+  constructor(private readonly callOrder: string[]) {
+    super();
+  }
+
+  async execute(context: ExecutionContext, action: SecurityAction): Promise<ActionExecutionResult> {
+    this.callOrder.push(this.executorId);
+    return super.execute(context, action);
+  }
+}
+
+class RecordingNotifyAuditExecutor extends NotifyAuditExecutor {
+  constructor(private readonly callOrder: string[]) {
+    super();
+  }
+
+  async execute(context: ExecutionContext, action: SecurityAction): Promise<ActionExecutionResult> {
+    this.callOrder.push(this.executorId);
+    return super.execute(context, action);
+  }
+}
+
 function normalizedEvent(): DiscordGatewayNormalizedEvent {
   return {
     eventName: 'CHANNEL_DELETE',
@@ -81,6 +167,49 @@ function normalizedEvent(): DiscordGatewayNormalizedEvent {
     correlationId: 'corr-1',
     payload: { id: 'event-1' },
   };
+}
+
+function createDetectionEngineDetector(
+  detectorId: string,
+  callOrder: string[],
+  supportedActionTypes: readonly SecurityPolicyActionType[] = [SecurityPolicyActionType.CHANNEL_DELETE],
+): DetectorPlugin {
+  return {
+    detectorId,
+    version: '1.0.0',
+    priority: 0,
+    supportedActionTypes,
+    enabled: () => true,
+    async evaluate(context) {
+      callOrder.push(`detector:${detectorId}`);
+      return Object.freeze({
+        detectorId,
+        matched: true,
+        findings: Object.freeze([
+          Object.freeze({
+            detectorId,
+            severity: DetectionSeverity.LOW,
+            confidence: DetectionConfidence.MEDIUM,
+            disposition: DetectionDisposition.SUSPICIOUS,
+            reason: `${detectorId} matched`,
+            correlationId: context.correlationId,
+            metadata: Object.freeze({ mock: true }),
+          }),
+        ]),
+        correlationId: context.correlationId,
+        metadata: Object.freeze({ mock: true }),
+      });
+    },
+  };
+}
+
+function createDetectorPluginRegistry(...plugins: readonly DetectorPlugin[]): InMemoryDetectorPluginRegistry {
+  const registry = new InMemoryDetectorPluginRegistry();
+  for (const plugin of plugins) {
+    registry.register(plugin);
+  }
+
+  return registry;
 }
 
 function createOrchestrator(
@@ -298,6 +427,31 @@ test('BLOCK produces REMOVE_UNAUTHORIZED_BOT, FREEZE_WEBHOOKS, CREATE_INCIDENT, 
   expect(result.executionResults.every((execution) => execution.success)).toBe(true);
 });
 
+test('BOT_ADD fast path keeps REMOVE_UNAUTHORIZED_BOT first in plan and execution order', async () => {
+  const callOrder: string[] = [];
+  const orchestrator = createOrchestrator(SecurityDecision.BLOCK, (registry) => {
+    registry.register(SecurityActionType.REMOVE_UNAUTHORIZED_BOT, new RecordingRemoveUnauthorizedBotExecutor(callOrder));
+    registry.register(SecurityActionType.FREEZE_WEBHOOKS, new RecordingFreezeWebhooksExecutor(callOrder));
+    registry.register(SecurityActionType.CREATE_INCIDENT, new RecordingCreateIncidentExecutor(callOrder));
+    registry.register(SecurityActionType.NOTIFY_AUDIT, new RecordingNotifyAuditExecutor(callOrder));
+  });
+
+  const result = await orchestrator.orchestrate(normalizedEvent(), 'actor-1', SecurityPolicyActionType.BOT_ADD);
+
+  expect(result.actionPlan.actions.map((action) => action.type)).toEqual([
+    SecurityActionType.REMOVE_UNAUTHORIZED_BOT,
+    SecurityActionType.FREEZE_WEBHOOKS,
+    SecurityActionType.CREATE_INCIDENT,
+    SecurityActionType.NOTIFY_AUDIT,
+  ]);
+  expect(callOrder[0]).toBe('remove-unauthorized-bot-executor');
+  expect(result.executionResults[0]?.executorId).toBe('remove-unauthorized-bot-executor');
+  expect(result.metadata).toMatchObject({
+    fastPath: true,
+    dispatchTargetMs: '1-5',
+  });
+});
+
 test('missing executor still safely reports unregistered executor after authorization ALLOW', async () => {
   const orchestrator = createOrchestrator(SecurityDecision.INVESTIGATE, () => {
     // Intentionally empty: authorization allows, registry has no executors.
@@ -459,11 +613,122 @@ test('runtime engine delegates once and preserves identity inputs', async () => 
   });
 });
 
+test('runtime engine executes detection engine exactly once before evaluation pipeline', async () => {
+  const pipeline = new RecordingDetectionAwareEvaluationPipeline();
+  const registry = new InMemorySecurityActionExecutorRegistry();
+  const orchestrator = new InMemorySecurityRuntimeOrchestrator(
+    pipeline,
+    new InMemorySecurityActionPlanner(),
+    registry,
+    new InMemoryExecutionAuthorizationEngine(new InMemoryExecutionAuthorizationProvider()),
+  );
+  const callOrder: string[] = [];
+  const detectionEngine: DetectionEngine = {
+    evaluate: jest.fn(async () => {
+      callOrder.push('detect');
+      return Object.freeze([]);
+    }),
+  };
+  const engine = new InMemorySecurityRuntimeEngine(
+    orchestrator,
+    pipeline,
+    new InMemoryDetectorPluginRegistry(),
+    detectionEngine,
+  );
+
+  await engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_DELETE);
+
+  expect(detectionEngine.evaluate).toHaveBeenCalledTimes(1);
+  expect([...callOrder, ...pipeline.callOrder]).toEqual(['detect', 'stageDetectionResults', 'evaluate']);
+});
+
+test('runtime engine passes detection results into security evaluation pipeline unchanged', async () => {
+  const pipeline = new RecordingDetectionAwareEvaluationPipeline();
+  const orchestrator = new InMemorySecurityRuntimeOrchestrator(
+    pipeline,
+    new InMemorySecurityActionPlanner(),
+    new InMemorySecurityActionExecutorRegistry(),
+    new InMemoryExecutionAuthorizationEngine(new InMemoryExecutionAuthorizationProvider()),
+  );
+  const detectionResults = Object.freeze([
+    Object.freeze({
+      detectorId: 'detector-a',
+      matched: true,
+      findings: Object.freeze([]),
+      correlationId: 'corr-1',
+      metadata: Object.freeze({ mock: true }),
+    }),
+  ]);
+  const detectionEngine: DetectionEngine = {
+    evaluate: jest.fn(async () => detectionResults),
+  };
+  const engine = new InMemorySecurityRuntimeEngine(
+    orchestrator,
+    pipeline,
+    new InMemoryDetectorPluginRegistry(),
+    detectionEngine,
+  );
+
+  await engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_DELETE);
+
+  expect(pipeline.stagedDetectionResults).toBe(detectionResults);
+});
+
+test('runtime engine preserves detector ordering and duplicate suppression', async () => {
+  const pipeline = new RecordingDetectionAwareEvaluationPipeline();
+  const orchestrator = new InMemorySecurityRuntimeOrchestrator(
+    pipeline,
+    new InMemorySecurityActionPlanner(),
+    new InMemorySecurityActionExecutorRegistry(),
+    new InMemoryExecutionAuthorizationEngine(new InMemoryExecutionAuthorizationProvider()),
+  );
+  const callOrder: string[] = [];
+  const registry = createDetectorPluginRegistry(
+    createDetectionEngineDetector('detector-b', callOrder),
+    createDetectionEngineDetector('detector-a', callOrder),
+    createDetectionEngineDetector('detector-c', callOrder, [SecurityPolicyActionType.ROLE_DELETE]),
+  );
+  const engine = new InMemorySecurityRuntimeEngine(
+    orchestrator,
+    pipeline,
+    registry,
+    new InMemoryDetectionEngine(registry),
+  );
+
+  await engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_DELETE);
+
+  expect(callOrder).toEqual(['detector:detector-a', 'detector:detector-b']);
+  expect(pipeline.stagedDetectionResults.map((result) => result.detectorId)).toEqual(['detector-a', 'detector-b']);
+});
+
+test('runtime engine preserves correlationId end-to-end through detection integration', async () => {
+  const pipeline = new RecordingDetectionAwareEvaluationPipeline();
+  const orchestrator = new InMemorySecurityRuntimeOrchestrator(
+    pipeline,
+    new InMemorySecurityActionPlanner(),
+    new InMemorySecurityActionExecutorRegistry(),
+    new InMemoryExecutionAuthorizationEngine(new InMemoryExecutionAuthorizationProvider()),
+  );
+  const registry = createDetectorPluginRegistry(createDetectionEngineDetector('detector-a', []));
+  const engine = new InMemorySecurityRuntimeEngine(
+    orchestrator,
+    pipeline,
+    registry,
+    new InMemoryDetectionEngine(registry),
+  );
+
+  const result = await engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_DELETE);
+
+  expect(result.correlationId).toBe('corr-1');
+  expect(result.decision.correlationId).toBe('corr-1');
+  expect(pipeline.stagedDetectionResults[0]?.correlationId).toBe('corr-1');
+});
+
 test('runtime engine result is immutable', async () => {
   const orchestrator = createOrchestrator(SecurityDecision.ALLOW, () => {
     // Intentionally empty.
   });
-  const engine = new InMemorySecurityRuntimeEngine(orchestrator);
+  const engine = new InMemorySecurityRuntimeEngine(orchestrator, new RecordingDetectionAwareEvaluationPipeline());
 
   const result = await engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_CREATE);
 
@@ -483,7 +748,7 @@ test('runtime engine wraps orchestrator errors consistently', async () => {
   const orchestrator = {
     orchestrate: jest.fn().mockRejectedValue(new Error('orchestrator failure')),
   } as unknown as SecurityRuntimeOrchestrator;
-  const engine = new InMemorySecurityRuntimeEngine(orchestrator);
+  const engine = new InMemorySecurityRuntimeEngine(orchestrator, new RecordingDetectionAwareEvaluationPipeline());
 
   await expect(engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_CREATE)).rejects.toThrow(
     'InMemorySecurityRuntimeEngine.process failed: orchestrator failure',
@@ -495,7 +760,10 @@ test('runtime engine remains side-effect free', async () => {
   const fetchMock = jest.fn();
   (globalThis as { fetch?: unknown }).fetch = fetchMock;
 
-  const engine = new InMemorySecurityRuntimeEngine(createOrchestrator(SecurityDecision.ALLOW, () => {}));
+  const engine = new InMemorySecurityRuntimeEngine(
+    createOrchestrator(SecurityDecision.ALLOW, () => {}),
+    new RecordingDetectionAwareEvaluationPipeline(),
+  );
 
   try {
     await engine.process(normalizedEvent(), 'actor-1', SecurityPolicyActionType.CHANNEL_CREATE);

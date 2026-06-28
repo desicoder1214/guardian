@@ -26,6 +26,10 @@ import {
   SecurityActionType as SecurityPolicyActionType,
   SecurityDecision,
 } from './security-policy-types';
+import {
+  SecurityRuntimeExecutionAdapter,
+  UnauthorizedBotAddFastPathExecutionAdapter,
+} from './unauthorized-bot-fast-path-adapter';
 
 export interface SecurityRuntimeResult {
   readonly decision: SecurityDecisionModel;
@@ -51,6 +55,7 @@ export class InMemorySecurityRuntimeOrchestrator implements SecurityRuntimeOrche
     private readonly authorizationEngine: ExecutionAuthorizationEngine = new InMemoryExecutionAuthorizationEngine(
       new InMemoryExecutionAuthorizationProvider(),
     ),
+    private readonly executionAdapter: SecurityRuntimeExecutionAdapter = new UnauthorizedBotAddFastPathExecutionAdapter(),
   ) {}
 
   async orchestrate(
@@ -62,138 +67,22 @@ export class InMemorySecurityRuntimeOrchestrator implements SecurityRuntimeOrche
     const actionPlan = this.securityActionPlanner.plan(decision);
     const executionResults: ActionExecutionResult[] = [];
 
-    for (const action of actionPlan.actions) {
-      if (action.type === SecurityActionType.NONE) {
-        continue;
-      }
+    const partition = this.executionAdapter.partition(decision, actionPlan, actionType);
+    const immediateResults = await this.executeActions(
+      partition.immediateActions,
+      decision,
+      actionPlan,
+      normalizedEvent,
+      actionType,
+    );
+    executionResults.push(...immediateResults);
 
-      const authorizationResult = this.authorizationEngine.authorize({
-        action,
-        actionPlan,
-        runtimeDecision: decision,
-        normalizedEvent,
-        correlationId: decision.correlationId,
-        guildId: decision.guildId,
-        actorId: decision.actorId,
-        metadata: {
-          source: 'security-runtime-orchestrator',
-        },
-      });
-
-      if (authorizationResult.decision === ExecutionAuthorizationDecision.DRY_RUN) {
-        executionResults.push({
-          success: true,
-          state: ExecutionState.DRY_RUN,
-          actionType: action.type,
-          executorId: 'authorization-engine',
-          metadata: {
-            skipped: true,
-            policyControlled: true,
-            authorizationDecision: authorizationResult.decision,
-            authorizationReason: authorizationResult.reason,
-          },
-        });
-        continue;
-      }
-
-      if (authorizationResult.decision === ExecutionAuthorizationDecision.SKIP) {
-        executionResults.push({
-          success: true,
-          state: ExecutionState.SKIPPED,
-          actionType: action.type,
-          executorId: 'authorization-engine',
-          metadata: {
-            skipped: true,
-            policyControlled: true,
-            authorizationDecision: authorizationResult.decision,
-            authorizationReason: authorizationResult.reason,
-          },
-        });
-        continue;
-      }
-
-      if (authorizationResult.decision === ExecutionAuthorizationDecision.DENY) {
-        executionResults.push({
-          success: true,
-          state: ExecutionState.DENIED,
-          actionType: action.type,
-          executorId: 'authorization-engine',
-          metadata: {
-            denied: true,
-            policyControlled: true,
-            authorizationDecision: authorizationResult.decision,
-            authorizationReason: authorizationResult.reason,
-          },
-        });
-        continue;
-      }
-
-      if (authorizationResult.reason === ExecutionAuthorizationReason.UNSUPPORTED_ACTION) {
-        executionResults.push({
-          success: false,
-          state: ExecutionState.SKIPPED,
-          actionType: action.type,
-          executorId: 'authorization-engine',
-          metadata: {
-            skipped: true,
-            authorizationDecision: authorizationResult.decision,
-            authorizationReason: authorizationResult.reason,
-          },
-        });
-        continue;
-      }
-
-      const executors = [...this.executorRegistry.resolveAll(action.type)];
-      if (executors.length === 0) {
-        executionResults.push({
-          success: false,
-          state: ExecutionState.SKIPPED,
-          actionType: action.type,
-          executorId: 'unregistered-executor',
-          metadata: {
-            skipped: true,
-            reason: `No executor registered for action type ${action.type}`,
-          },
-        });
-        continue;
-      }
-
-      for (const executor of executors) {
-        if (!executor.supports(action)) {
-          executionResults.push({
-            success: false,
-            state: ExecutionState.SKIPPED,
-            actionType: action.type,
-            executorId: executor.executorId,
-            metadata: {
-              skipped: true,
-              reason: `Executor ${executor.executorId} does not support action type ${action.type}`,
-            },
-          });
-          continue;
-        }
-
-        try {
-          const context = this.buildExecutionContext(decision, actionPlan, action, normalizedEvent);
-          const executionResult = await executor.execute(context, action);
-          executionResults.push({
-            ...executionResult,
-            state: executionResult.success ? ExecutionState.SUCCESS : ExecutionState.FAILED,
-          });
-        } catch (error) {
-          executionResults.push({
-            success: false,
-            state: ExecutionState.FAILED,
-            actionType: action.type,
-            executorId: executor.executorId,
-            metadata: {
-              error: error instanceof Error ? error.message : 'Unknown execution error',
-              safelyHandled: true,
-            },
-          });
-        }
-      }
-    }
+    const deferredResults = await Promise.all(
+      partition.deferredActions.map((action) =>
+        this.executeSingleAction(action, decision, actionPlan, normalizedEvent, actionType),
+      ),
+    );
+    executionResults.push(...deferredResults);
 
     const immutableExecutionResults = Object.freeze(
       executionResults.map((executionResult) =>
@@ -212,7 +101,167 @@ export class InMemorySecurityRuntimeOrchestrator implements SecurityRuntimeOrche
       metadata: Object.freeze({
         orchestrator: 'in-memory-security-runtime-orchestrator',
         eventName: normalizedEvent.eventName,
+        ...(partition.metadata ?? {}),
       }),
+    });
+  }
+
+  private async executeActions(
+    actions: readonly SecurityAction[],
+    decision: SecurityDecisionModel,
+    actionPlan: SecurityActionPlan,
+    normalizedEvent: DiscordGatewayNormalizedEvent,
+    actionType: SecurityPolicyActionType,
+  ): Promise<readonly ActionExecutionResult[]> {
+    const results: ActionExecutionResult[] = [];
+
+    for (const action of actions) {
+      if (action.type === SecurityActionType.NONE) {
+        continue;
+      }
+
+      results.push(await this.executeSingleAction(action, decision, actionPlan, normalizedEvent, actionType));
+    }
+
+    return Object.freeze(results);
+  }
+
+  private async executeSingleAction(
+    action: SecurityAction,
+    decision: SecurityDecisionModel,
+    actionPlan: SecurityActionPlan,
+    normalizedEvent: DiscordGatewayNormalizedEvent,
+    actionType: SecurityPolicyActionType,
+  ): Promise<ActionExecutionResult> {
+    const authorizationResult = this.authorizationEngine.authorize({
+      action,
+      actionPlan,
+      runtimeDecision: decision,
+      normalizedEvent,
+      correlationId: decision.correlationId,
+      guildId: decision.guildId,
+      actorId: decision.actorId,
+      metadata: {
+        source: 'security-runtime-orchestrator',
+        actionType,
+      },
+    });
+
+    if (authorizationResult.decision === ExecutionAuthorizationDecision.DRY_RUN) {
+      return Object.freeze({
+        success: true,
+        state: ExecutionState.DRY_RUN,
+        actionType: action.type,
+        executorId: 'authorization-engine',
+        metadata: Object.freeze({
+          skipped: true,
+          policyControlled: true,
+          authorizationDecision: authorizationResult.decision,
+          authorizationReason: authorizationResult.reason,
+        }),
+      });
+    }
+
+    if (authorizationResult.decision === ExecutionAuthorizationDecision.SKIP) {
+      return Object.freeze({
+        success: true,
+        state: ExecutionState.SKIPPED,
+        actionType: action.type,
+        executorId: 'authorization-engine',
+        metadata: Object.freeze({
+          skipped: true,
+          policyControlled: true,
+          authorizationDecision: authorizationResult.decision,
+          authorizationReason: authorizationResult.reason,
+        }),
+      });
+    }
+
+    if (authorizationResult.decision === ExecutionAuthorizationDecision.DENY) {
+      return Object.freeze({
+        success: true,
+        state: ExecutionState.DENIED,
+        actionType: action.type,
+        executorId: 'authorization-engine',
+        metadata: Object.freeze({
+          denied: true,
+          policyControlled: true,
+          authorizationDecision: authorizationResult.decision,
+          authorizationReason: authorizationResult.reason,
+        }),
+      });
+    }
+
+    if (authorizationResult.reason === ExecutionAuthorizationReason.UNSUPPORTED_ACTION) {
+      return Object.freeze({
+        success: false,
+        state: ExecutionState.SKIPPED,
+        actionType: action.type,
+        executorId: 'authorization-engine',
+        metadata: Object.freeze({
+          skipped: true,
+          authorizationDecision: authorizationResult.decision,
+          authorizationReason: authorizationResult.reason,
+        }),
+      });
+    }
+
+    const executors = [...this.executorRegistry.resolveAll(action.type)];
+    if (executors.length === 0) {
+      return Object.freeze({
+        success: false,
+        state: ExecutionState.SKIPPED,
+        actionType: action.type,
+        executorId: 'unregistered-executor',
+        metadata: Object.freeze({
+          skipped: true,
+          reason: `No executor registered for action type ${action.type}`,
+        }),
+      });
+    }
+
+    for (const executor of executors) {
+      if (!executor.supports(action)) {
+        return Object.freeze({
+          success: false,
+          state: ExecutionState.SKIPPED,
+          actionType: action.type,
+          executorId: executor.executorId,
+          metadata: Object.freeze({
+            skipped: true,
+            reason: `Executor ${executor.executorId} does not support action type ${action.type}`,
+          }),
+        });
+      }
+
+      try {
+        const context = this.buildExecutionContext(decision, actionPlan, action, normalizedEvent);
+        const executionResult = await executor.execute(context, action);
+        return Object.freeze({
+          ...executionResult,
+          state: executionResult.success ? ExecutionState.SUCCESS : ExecutionState.FAILED,
+          metadata: executionResult.metadata ? Object.freeze({ ...executionResult.metadata }) : undefined,
+        });
+      } catch (error) {
+        return Object.freeze({
+          success: false,
+          state: ExecutionState.FAILED,
+          actionType: action.type,
+          executorId: executor.executorId,
+          metadata: Object.freeze({
+            error: error instanceof Error ? error.message : 'Unknown execution error',
+            safelyHandled: true,
+          }),
+        });
+      }
+    }
+
+    return Object.freeze({
+      success: false,
+      state: ExecutionState.SKIPPED,
+      actionType: action.type,
+      executorId: 'unreachable-executor',
+      metadata: Object.freeze({ skipped: true, reason: 'No execution result resolved' }),
     });
   }
 

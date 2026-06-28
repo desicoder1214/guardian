@@ -7,8 +7,8 @@ import {
   DetectionSeverity,
   DetectionResult,
   InMemoryDetectionEngine,
-  SecurityDetector,
 } from '../../src/core/runtime/discord/detection-engine';
+import { DetectorPlugin, InMemoryDetectorPluginRegistry } from '../../src/core/runtime/discord/detection-plugin-framework';
 
 function normalizedEvent(): DiscordGatewayNormalizedEvent {
   return {
@@ -36,10 +36,13 @@ function createDetector(
   detectorId: string,
   supportedActionTypes: readonly SecurityPolicyActionType[],
   evaluateImpl?: (context: DetectionContext) => Promise<DetectionResult>,
-): SecurityDetector {
+): DetectorPlugin {
   return {
     detectorId,
+    version: '1.0.0',
+    priority: 0,
     supportedActionTypes,
+    enabled: () => true,
     evaluate: evaluateImpl ??
       (async (context) => ({
         detectorId,
@@ -61,52 +64,61 @@ function createDetector(
   };
 }
 
+function createRegistry(...detectors: readonly DetectorPlugin[]): InMemoryDetectorPluginRegistry {
+  const registry = new InMemoryDetectorPluginRegistry();
+  for (const detector of detectors) {
+    registry.register(detector);
+  }
+
+  return registry;
+}
+
 test('supported detectors execute', async () => {
-  const engine = new InMemoryDetectionEngine();
   const detectors = [
     createDetector('detector-b', [SecurityPolicyActionType.CHANNEL_DELETE]),
     createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE]),
   ];
+  const engine = new InMemoryDetectionEngine(createRegistry(...detectors));
 
-  const results = await engine.evaluate(detectionContext(), detectors);
+  const results = await engine.evaluate(detectionContext());
 
   expect(results).toHaveLength(2);
   expect(results.map((result) => result.detectorId)).toEqual(['detector-a', 'detector-b']);
 });
 
 test('unsupported detectors are skipped', async () => {
-  const engine = new InMemoryDetectionEngine();
   const supported = createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE]);
   const unsupported = createDetector('detector-b', [SecurityPolicyActionType.ROLE_CREATE]);
+  const engine = new InMemoryDetectionEngine(createRegistry(unsupported, supported));
 
-  const results = await engine.evaluate(detectionContext(), [unsupported, supported]);
+  const results = await engine.evaluate(detectionContext());
 
   expect(results).toHaveLength(1);
   expect(results[0]?.detectorId).toBe('detector-a');
 });
 
 test('detector ordering is deterministic', async () => {
-  const engine = new InMemoryDetectionEngine();
   const detectors = [
-    createDetector('detector-c', [SecurityPolicyActionType.CHANNEL_DELETE]),
-    createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE]),
-    createDetector('detector-b', [SecurityPolicyActionType.CHANNEL_DELETE]),
+    { ...createDetector('detector-c', [SecurityPolicyActionType.CHANNEL_DELETE]), priority: 10 },
+    { ...createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE]), priority: 20 },
+    { ...createDetector('detector-b', [SecurityPolicyActionType.CHANNEL_DELETE]), priority: 20 },
   ];
+  const engine = new InMemoryDetectionEngine(createRegistry(...detectors));
 
-  const results = await engine.evaluate(detectionContext(), detectors);
+  const results = await engine.evaluate(detectionContext());
 
   expect(results.map((result) => result.detectorId)).toEqual(['detector-a', 'detector-b', 'detector-c']);
 });
 
 test('detector exceptions become UNKNOWN findings', async () => {
-  const engine = new InMemoryDetectionEngine();
   const detectors = [
     createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE], async () => {
       throw new Error('detector failure');
     }),
   ];
+  const engine = new InMemoryDetectionEngine(createRegistry(...detectors));
 
-  const results = await engine.evaluate(detectionContext(), detectors);
+  const results = await engine.evaluate(detectionContext());
 
   expect(results).toHaveLength(1);
   expect(results[0]?.matched).toBe(false);
@@ -121,7 +133,6 @@ test('detector exceptions become UNKNOWN findings', async () => {
 });
 
 test('duplicate detector IDs are not executed twice', async () => {
-  const engine = new InMemoryDetectionEngine();
   const evaluateSpy = jest.fn(async (context: DetectionContext) => ({
     detectorId: 'detector-a',
     matched: true,
@@ -129,34 +140,45 @@ test('duplicate detector IDs are not executed twice', async () => {
     correlationId: context.correlationId,
   }));
 
-  const detectors = [
-    createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE], evaluateSpy),
-    createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE], evaluateSpy),
-  ];
+  const registry = new InMemoryDetectorPluginRegistry();
+  registry.register(createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE], evaluateSpy));
+  expect(() =>
+    registry.register(createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE], evaluateSpy)),
+  ).toThrow('Detector plugin detector-a is already registered');
 
-  const results = await engine.evaluate(detectionContext(), detectors);
+  const engine = new InMemoryDetectionEngine(registry);
+  const results = await engine.evaluate(detectionContext());
 
   expect(evaluateSpy).toHaveBeenCalledTimes(1);
   expect(results).toHaveLength(1);
 });
 
+test('detection engine consumes only the canonical registry', async () => {
+  const registry = createRegistry(createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE]));
+  const getPluginsSpy = jest.spyOn(registry, 'getPlugins');
+  const engine = new InMemoryDetectionEngine(registry);
+
+  const results = await engine.evaluate(detectionContext());
+
+  expect(getPluginsSpy).toHaveBeenCalledTimes(1);
+  expect(results.map((result) => result.detectorId)).toEqual(['detector-a']);
+});
+
 test('correlationId is preserved', async () => {
-  const engine = new InMemoryDetectionEngine();
-  const results = await engine.evaluate(
-    detectionContext(SecurityPolicyActionType.CHANNEL_DELETE),
-    [createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE])],
+  const engine = new InMemoryDetectionEngine(
+    createRegistry(createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE])),
   );
+  const results = await engine.evaluate(detectionContext(SecurityPolicyActionType.CHANNEL_DELETE));
 
   expect(results[0]?.correlationId).toBe('corr-1');
   expect(results[0]?.findings[0]?.correlationId).toBe('corr-1');
 });
 
 test('results and findings are immutable', async () => {
-  const engine = new InMemoryDetectionEngine();
-  const results = await engine.evaluate(
-    detectionContext(SecurityPolicyActionType.CHANNEL_DELETE),
-    [createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE])],
+  const engine = new InMemoryDetectionEngine(
+    createRegistry(createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE])),
   );
+  const results = await engine.evaluate(detectionContext(SecurityPolicyActionType.CHANNEL_DELETE));
 
   expect(Object.isFrozen(results)).toBe(true);
   expect(Object.isFrozen(results[0] ?? {})).toBe(true);
@@ -177,13 +199,12 @@ test('detection engine remains side-effect free', async () => {
   const fetchMock = jest.fn();
   (globalThis as { fetch?: unknown }).fetch = fetchMock;
 
-  const engine = new InMemoryDetectionEngine();
+  const engine = new InMemoryDetectionEngine(
+    createRegistry(createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE])),
+  );
 
   try {
-    await engine.evaluate(
-      detectionContext(SecurityPolicyActionType.CHANNEL_DELETE),
-      [createDetector('detector-a', [SecurityPolicyActionType.CHANNEL_DELETE])],
-    );
+    await engine.evaluate(detectionContext(SecurityPolicyActionType.CHANNEL_DELETE));
     expect(fetchMock).not.toHaveBeenCalled();
   } finally {
     (globalThis as { fetch?: unknown }).fetch = previousFetch;

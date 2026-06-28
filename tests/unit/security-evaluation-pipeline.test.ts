@@ -6,6 +6,7 @@ import {
   AuditAttributionEngine,
   AuditAttributionResult,
 } from '../../src/core/runtime/discord/audit-attribution-types';
+import { DetectionConfidence, DetectionDisposition, DetectionSeverity } from '../../src/core/runtime/discord/detection-engine';
 import { DiscordGatewayNormalizedEvent } from '../../src/core/runtime/discord/pipeline-types';
 import { InMemorySecurityDecisionEngine } from '../../src/core/runtime/discord/security-decision-engine';
 import {
@@ -236,6 +237,49 @@ test('threshold violation returns configured policy decision', async () => {
   const result = await pipeline.evaluate(buildEvent(), 'actor-1', SecurityActionType.CHANNEL_DELETE);
 
   expect(result.decision).toBe(SecurityDecision.BLOCK);
+});
+
+test('malicious unauthorized bot detection forces BLOCK for BOT_ADD fast path', async () => {
+  const pipeline = new InMemorySecurityEvaluationPipeline(
+    new StubSecurityContextBuilder(),
+    new StubAuditAttributionEngine(buildAttribution({ confidence: AuditAttributionConfidence.HIGH })),
+    new StubSecurityPolicyEngine(buildPolicy({ decision: SecurityDecision.ALLOW, thresholdExceeded: false })),
+    new InMemorySecurityDecisionEngine(),
+  );
+
+  pipeline.stageDetectionResults([
+    Object.freeze({
+      detectorId: 'generic-threat-detector',
+      matched: true,
+      findings: Object.freeze([
+        Object.freeze({
+          detectorId: 'generic-threat-detector',
+          severity: DetectionSeverity.HIGH,
+          confidence: DetectionConfidence.HIGH,
+          disposition: DetectionDisposition.MALICIOUS,
+          reason: 'Bot bot-1 is not authorized for addition',
+          correlationId: 'corr-1',
+          metadata: Object.freeze({
+            botId: 'bot-1',
+            runtimeThreatOverrides: Object.freeze([
+              Object.freeze({
+                type: 'FORCE_BLOCK',
+                applicableEventTypes: Object.freeze(['BOT_ADD']),
+                reason: 'malicious unauthorized bot add detected',
+              }),
+            ]),
+          }),
+        }),
+      ]),
+      correlationId: 'corr-1',
+      metadata: Object.freeze({ detectorType: 'production-foundation' }),
+    }),
+  ]);
+
+  const result = await pipeline.evaluate(buildEvent(), 'actor-1', SecurityActionType.BOT_ADD);
+
+  expect(result.decision).toBe(SecurityDecision.BLOCK);
+  expect(result.reason).toBe('POLICY_BLOCK');
 });
 
 test('disabled policy returns IGNORE', async () => {
