@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { InMemoryDetectionEngine } from '../../src/core/runtime/discord/detection-engine';
 import { InMemoryDetectorPluginRegistry } from '../../src/core/runtime/discord/detection-plugin-framework';
 import { DiscordGatewayNormalizedEvent } from '../../src/core/runtime/discord/pipeline-types';
@@ -67,7 +69,49 @@ test('unauthorized bot add produces MALICIOUS finding', async () => {
   expect(result.matched).toBe(true);
   expect(result.findings).toHaveLength(1);
   expect(result.findings[0]?.disposition).toBe('MALICIOUS');
+  expect(result.findings[0]?.severity).toBe('CRITICAL');
   expect(result.findings[0]?.reason).toBe('Bot bot-1 is not authorized for addition');
+});
+
+test('non-bot member add events are ignored', async () => {
+  const detector = new UnauthorizedBotAddDetector();
+
+  const result = await detector.evaluate(
+    buildContext({
+      normalizedEvent: buildEvent({
+        payload: {
+          guildId: 'guild-1',
+          actorId: 'actor-1',
+          user: {
+            id: 'user-1',
+            bot: false,
+          },
+        },
+      }),
+    }),
+  );
+
+  expect(result.matched).toBe(false);
+  expect(result.findings).toHaveLength(1);
+  expect(result.findings[0]?.disposition).toBe('CLEAN');
+  expect(result.findings[0]?.reason).toBe('Event does not represent a bot add operation');
+});
+
+test('non bot/member event types are ignored', async () => {
+  const detector = new UnauthorizedBotAddDetector();
+
+  const result = await detector.evaluate(
+    buildContext({
+      normalizedEvent: buildEvent({
+        eventName: 'MESSAGE_CREATE',
+      }),
+    }),
+  );
+
+  expect(result.matched).toBe(false);
+  expect(result.findings).toHaveLength(1);
+  expect(result.findings[0]?.disposition).toBe('CLEAN');
+  expect(result.findings[0]?.reason).toBe('Event does not represent a bot add operation');
 });
 
 test('detection result is immutable', async () => {
@@ -147,5 +191,28 @@ test('legacy detector wrapper remains side-effect free', async () => {
     expect(fetchMock).not.toHaveBeenCalled();
   } finally {
     (globalThis as { fetch?: unknown }).fetch = previousFetch;
+  }
+});
+
+test('detector foundation has no forbidden integration surfaces', () => {
+  const detectorFilePath = path.join(process.cwd(), 'src/core/runtime/discord/unauthorized-bot-add-detector.ts');
+  const source = readFileSync(detectorFilePath, 'utf8');
+
+  const forbiddenPatterns = [
+    /discord\.js/i,
+    /node:fs|from\s+['"]fs['"]/i,
+    /fetch\s*\(/i,
+    /REST/i,
+    /database|typeorm|prisma|mongoose|sequelize/i,
+    /persist|repository|save\s*\(/i,
+    /ban\s*\(|kick\s*\(|quarantine/i,
+    /lockdown/i,
+    /webhook/i,
+    /recovery/i,
+    /punishment/i,
+  ];
+
+  for (const pattern of forbiddenPatterns) {
+    expect(source).not.toMatch(pattern);
   }
 });

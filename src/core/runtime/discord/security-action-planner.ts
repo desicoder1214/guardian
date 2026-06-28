@@ -1,3 +1,4 @@
+import type { ThreatAssessment } from './runtime-threat-interpretation-engine';
 import { SecurityDecisionModel } from './security-decision-types';
 import { SecurityDecision } from './security-policy-types';
 
@@ -7,6 +8,10 @@ export enum SecurityActionType {
   QUARANTINE_ACTOR = 'QUARANTINE_ACTOR',
   REMOVE_UNAUTHORIZED_BOT = 'REMOVE_UNAUTHORIZED_BOT',
   FREEZE_WEBHOOKS = 'FREEZE_WEBHOOKS',
+  REMOVE_DANGEROUS_ROLE = 'REMOVE_DANGEROUS_ROLE',
+  NEUTRALIZE_ESCALATED_MEMBER = 'NEUTRALIZE_ESCALATED_MEMBER',
+  REVOKE_ESCALATION_SOURCE = 'REVOKE_ESCALATION_SOURCE',
+  PUNISH_ROLE_ESCALATION_ACTOR = 'PUNISH_ROLE_ESCALATION_ACTOR',
   LOCK_CHANNELS = 'LOCK_CHANNELS',
   RESTORE_RESOURCE = 'RESTORE_RESOURCE',
   CREATE_INCIDENT = 'CREATE_INCIDENT',
@@ -28,10 +33,15 @@ export interface SecurityAction {
   readonly metadata?: unknown;
 }
 
+export interface SecurityActionPlanMetadata {
+  readonly threatAssessment?: ThreatAssessment;
+}
+
 export interface SecurityActionPlan {
   readonly decision: SecurityDecision;
   readonly actions: readonly SecurityAction[];
   readonly correlationId: string;
+  readonly metadata?: SecurityActionPlanMetadata;
 }
 
 export interface SecurityActionPlanner {
@@ -61,6 +71,10 @@ const ACTION_PRIORITY_MAP: Record<SecurityActionType, SecurityActionPriority> = 
   [SecurityActionType.QUARANTINE_ACTOR]: SecurityActionPriority.CRITICAL,
   [SecurityActionType.REMOVE_UNAUTHORIZED_BOT]: SecurityActionPriority.CRITICAL,
   [SecurityActionType.FREEZE_WEBHOOKS]: SecurityActionPriority.HIGH,
+  [SecurityActionType.REMOVE_DANGEROUS_ROLE]: SecurityActionPriority.CRITICAL,
+  [SecurityActionType.NEUTRALIZE_ESCALATED_MEMBER]: SecurityActionPriority.HIGH,
+  [SecurityActionType.REVOKE_ESCALATION_SOURCE]: SecurityActionPriority.HIGH,
+  [SecurityActionType.PUNISH_ROLE_ESCALATION_ACTOR]: SecurityActionPriority.NORMAL,
   [SecurityActionType.LOCK_CHANNELS]: SecurityActionPriority.HIGH,
   [SecurityActionType.RESTORE_RESOURCE]: SecurityActionPriority.HIGH,
   [SecurityActionType.CREATE_INCIDENT]: SecurityActionPriority.NORMAL,
@@ -72,6 +86,7 @@ export class InMemorySecurityActionPlanner implements SecurityActionPlanner {
   plan(decisionModel: SecurityDecisionModel): SecurityActionPlan {
     const actionTypes = this.resolveActions(decisionModel.decision);
     const uniqueActionTypes = [...new Set(actionTypes)];
+    const threatAssessment = this.readThreatAssessment(decisionModel.metadata);
     const actions = uniqueActionTypes.map((type, index) => {
       const metadata = Object.freeze({
         decision: decisionModel.decision,
@@ -90,10 +105,48 @@ export class InMemorySecurityActionPlanner implements SecurityActionPlanner {
       decision: decisionModel.decision,
       actions: Object.freeze(actions),
       correlationId: decisionModel.correlationId,
+      ...(threatAssessment
+        ? {
+            metadata: Object.freeze({
+              threatAssessment,
+            }),
+          }
+        : {}),
     });
   }
 
   private resolveActions(decision: SecurityDecision): readonly SecurityActionType[] {
     return DECISION_ACTION_MATRIX[decision] ?? [SecurityActionType.NONE];
+  }
+
+  private readThreatAssessment(metadata: unknown): ThreatAssessment | undefined {
+    if (!metadata || typeof metadata !== 'object') {
+      return undefined;
+    }
+
+    const candidate = metadata as { threatAssessment?: ThreatAssessment };
+    const threatAssessment = candidate.threatAssessment;
+
+    if (!threatAssessment || typeof threatAssessment !== 'object') {
+      return undefined;
+    }
+
+    return Object.freeze({
+      severity: threatAssessment.severity,
+      confidence: threatAssessment.confidence,
+      disposition: threatAssessment.disposition,
+      rationale: threatAssessment.rationale,
+      correlationIds: Object.freeze([...threatAssessment.correlationIds]),
+      overrides: Object.freeze(
+        threatAssessment.overrides.map((override) =>
+          Object.freeze({
+            type: override.type,
+            applicableEventTypes: Object.freeze([...override.applicableEventTypes]),
+            reason: override.reason,
+            metadata: override.metadata ? Object.freeze({ ...override.metadata }) : undefined,
+          }),
+        ),
+      ),
+    });
   }
 }

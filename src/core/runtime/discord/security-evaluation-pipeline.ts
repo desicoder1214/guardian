@@ -6,10 +6,12 @@ import {
 } from './audit-attribution-types';
 import { DetectionResult } from './detection-engine';
 import {
-  MetadataRuntimeThreatInterpreter,
-  type RuntimeThreatInterpreter,
   RuntimeThreatOverrideType,
 } from './runtime-threat-interpretation';
+import {
+  InMemoryRuntimeThreatInterpretationEngine,
+  RuntimeThreatInterpretationEngine,
+} from './runtime-threat-interpretation-engine';
 import { DiscordGatewayNormalizedEvent } from './pipeline-types';
 import { SecurityDecisionEngine, SecurityDecisionModel } from './security-decision-types';
 import { SecurityContextBuilder } from './security-context';
@@ -50,16 +52,16 @@ export interface DetectionAwareSecurityEvaluationPipeline extends SecurityEvalua
 
 export class InMemorySecurityEvaluationPipeline implements DetectionAwareSecurityEvaluationPipeline {
   private stagedDetectionResults: readonly DetectionResult[] = Object.freeze([]);
-      private readonly threatInterpreter: RuntimeThreatInterpreter<DetectionResult>;
+  private readonly threatInterpretationEngine: RuntimeThreatInterpretationEngine;
 
   constructor(
     private readonly contextBuilder: SecurityContextBuilder,
     private readonly attributionEngine: AuditAttributionEngine,
     private readonly policyEngine: SecurityPolicyEngine,
     private readonly decisionEngine: SecurityDecisionEngine,
-    threatInterpreter?: RuntimeThreatInterpreter<DetectionResult>,
+    threatInterpretationEngine?: RuntimeThreatInterpretationEngine,
   ) {
-    this.threatInterpreter = threatInterpreter ?? new MetadataRuntimeThreatInterpreter();
+    this.threatInterpretationEngine = threatInterpretationEngine ?? new InMemoryRuntimeThreatInterpretationEngine();
   }
 
   stageDetectionResults(detectionResults: readonly DetectionResult[]): void {
@@ -88,10 +90,15 @@ export class InMemorySecurityEvaluationPipeline implements DetectionAwareSecurit
   ): Promise<SecurityDecisionModel> {
     const context = this.contextBuilder.build(normalizedEvent, actorId, actionType);
     const mappedActionType = resolveAuditActionType(actionType);
+    const threatAssessment = this.threatInterpretationEngine.assess(this.stagedDetectionResults);
     const attribution = mappedActionType
       ? await this.attributionEngine.attribute(normalizedEvent, mappedActionType)
       : this.unsupportedActionAttribution(actorId);
-    const policy = this.applyDetectionPolicyOverride(actionType, await this.policyEngine.evaluate(context));
+    const policy = this.applyThreatAssessmentPolicyOverride(
+      actionType,
+      await this.policyEngine.evaluate(context),
+      threatAssessment,
+    );
 
     const decision = await this.decisionEngine.evaluate(context, attribution, this.toPolicyDecision(policy));
 
@@ -102,6 +109,7 @@ export class InMemorySecurityEvaluationPipeline implements DetectionAwareSecurit
           ? (decision.metadata as Record<string, unknown>)
           : {}),
         detectionResults: this.stagedDetectionResults,
+        threatAssessment,
       },
     };
   }
@@ -117,17 +125,16 @@ export class InMemorySecurityEvaluationPipeline implements DetectionAwareSecurit
     };
   }
 
-  private applyDetectionPolicyOverride(
+  private applyThreatAssessmentPolicyOverride(
     actionType: SecurityActionType,
     policy: SecurityDecisionResult,
+    threatAssessment: ReturnType<RuntimeThreatInterpretationEngine['assess']>,
   ): SecurityDecisionResult {
-    const forceBlockOverride = this.stagedDetectionResults
-      .flatMap((detectionResult) => this.threatInterpreter.interpret(detectionResult).overrides)
-      .find(
-        (override) =>
-          override.type === RuntimeThreatOverrideType.FORCE_BLOCK &&
-          override.applicableEventTypes.includes(actionType),
-      );
+    const forceBlockOverride = threatAssessment.overrides.find(
+      (override) =>
+        override.type === RuntimeThreatOverrideType.FORCE_BLOCK &&
+        override.applicableEventTypes.includes(actionType),
+    );
 
     if (!forceBlockOverride) {
       return policy;

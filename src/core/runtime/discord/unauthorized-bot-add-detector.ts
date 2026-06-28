@@ -49,7 +49,7 @@ export class UnauthorizedBotAddDetector implements DetectorPlugin, Detector {
 
     const finding = this.freezeFinding({
       detectorId: this.detectorId,
-      severity: disposition === DetectionDisposition.MALICIOUS ? DetectionSeverity.HIGH : DetectionSeverity.INFO,
+      severity: disposition === DetectionDisposition.MALICIOUS ? DetectionSeverity.CRITICAL : DetectionSeverity.INFO,
       confidence: disposition === DetectionDisposition.MALICIOUS ? DetectionConfidence.HIGH : DetectionConfidence.CERTAIN,
       disposition,
       reason: this.resolveReason(disposition, isBotAddEvent, botId),
