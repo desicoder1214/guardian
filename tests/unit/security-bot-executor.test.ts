@@ -76,8 +76,9 @@ test('authorized removal request executes', async () => {
     vanity: {} as DiscordExecutionService['vanity'],
     integration: {} as DiscordExecutionService['integration'],
     bot: {
-      async removeUnauthorizedBot(correlationId: string) {
+      async removeUnauthorizedBot(request) {
         callCount += 1;
+        const correlationId = typeof request === 'string' ? request : request.correlationId;
         return Object.freeze({
           status: DiscordExecutionStatus.SUCCESS,
           executionTimeMs: 0,
@@ -109,8 +110,9 @@ test('unauthorized request is rejected and never executes Discord call', async (
     vanity: {} as DiscordExecutionService['vanity'],
     integration: {} as DiscordExecutionService['integration'],
     bot: {
-      async removeUnauthorizedBot(correlationId: string) {
+      async removeUnauthorizedBot(request) {
         callCount += 1;
+        const correlationId = typeof request === 'string' ? request : request.correlationId;
         return Object.freeze({
           status: DiscordExecutionStatus.SUCCESS,
           executionTimeMs: 0,
@@ -172,8 +174,9 @@ test('idempotency prevents duplicate execution', async () => {
     vanity: {} as DiscordExecutionService['vanity'],
     integration: {} as DiscordExecutionService['integration'],
     bot: {
-      async removeUnauthorizedBot(correlationId: string) {
+      async removeUnauthorizedBot(request) {
         callCount += 1;
+        const correlationId = typeof request === 'string' ? request : request.correlationId;
         return Object.freeze({
           status: DiscordExecutionStatus.SUCCESS,
           executionTimeMs: 0,

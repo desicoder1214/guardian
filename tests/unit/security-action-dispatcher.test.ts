@@ -137,8 +137,9 @@ function buildService(spy: { calls: string[] }): DiscordExecutionService {
   };
 
   const bot: BotExecutionService = {
-    removeUnauthorizedBot: async (correlationId) => {
+    removeUnauthorizedBot: async (request) => {
       spy.calls.push('bot.removeUnauthorizedBot');
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
       return result(correlationId, 'bot.removeUnauthorizedBot');
     },
   };
