@@ -146,6 +146,7 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
       }
 
       const executor = this.domainExecutorRegistry.resolve(targetedDomain, targetedCapability);
+      const securityDecision = route.authorizationResult.authorizationRequirements[0]?.decision;
       const request = freezeRequest({
         route,
         planId: routingResult.planId,
@@ -153,7 +154,12 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
         correlationId: routingResult.correlationId,
         domain: targetedDomain,
         capability: targetedCapability,
-        metadata: Object.freeze({ source: 'in-memory-security-execution-dispatcher' }),
+        metadata: Object.freeze({
+          source: 'in-memory-security-execution-dispatcher',
+          threatAssessment: route.authorizationResult.threatAssessment,
+          securityDecision,
+          authorizationMetadata: route.authorizationResult.metadata,
+        }),
       });
 
       const executionResult = executor

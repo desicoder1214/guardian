@@ -343,6 +343,8 @@ test('dispatcher executable intent can be executed through bot executor and prod
   expect(executableBotIntent).toBeDefined();
 
   const baseRequest = executableBotIntent?.executionRequest as SecurityDomainExecutionRequest;
+  expect(baseRequest.metadata?.threatAssessment).toBeDefined();
+  expect(baseRequest.metadata?.securityDecision).toBeDefined();
   const executionRequest = Object.freeze({
     ...baseRequest,
     metadata: Object.freeze({

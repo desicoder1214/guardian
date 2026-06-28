@@ -330,6 +330,64 @@ test('production service classifies permission failures with verified outcome an
   expect(metadata.error.retryable).toBe(false);
 });
 
+test('production service classifies generic API failures as API_ERROR', async () => {
+  const operation: DiscordBotRemovalOperation = {
+    async removeUnauthorizedBot() {
+      return Object.freeze({
+        ok: false,
+        statusCode: 400,
+        error: Object.freeze({ code: 'API_ERROR', message: 'Bad Request', retryable: false }),
+      });
+    },
+  };
+
+  const service = new ProductionDiscordExecutionService(operation, { maxAttempts: 2 });
+  const result = await service.bot.removeUnauthorizedBot({
+    correlationId: 'corr-prod-api-failure',
+    guildId: 'g-1',
+    botUserId: 'bot-1',
+    idempotencyKey: 'idem-api-failure',
+  });
+
+  expect(result.status).toBe(DiscordExecutionStatus.FAILED);
+  const metadata = result.metadata as {
+    verification: { outcome: DiscordBotRemovalVerificationOutcome };
+    error: { code: DiscordExecutionErrorCode; retryable: boolean };
+  };
+  expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.FAILURE);
+  expect(metadata.error.code).toBe(DiscordExecutionErrorCode.API_ERROR);
+  expect(metadata.error.retryable).toBe(false);
+});
+
+test('production service classifies explicit unknown errors as UNKNOWN_ERROR', async () => {
+  const operation: DiscordBotRemovalOperation = {
+    async removeUnauthorizedBot() {
+      return Object.freeze({
+        ok: false,
+        statusCode: 520,
+        error: Object.freeze({ code: 'UNKNOWN_ERROR', message: 'Unknown upstream error', retryable: false }),
+      });
+    },
+  };
+
+  const service = new ProductionDiscordExecutionService(operation, { maxAttempts: 2 });
+  const result = await service.bot.removeUnauthorizedBot({
+    correlationId: 'corr-prod-unknown-failure',
+    guildId: 'g-1',
+    botUserId: 'bot-1',
+    idempotencyKey: 'idem-unknown-failure',
+  });
+
+  expect(result.status).toBe(DiscordExecutionStatus.FAILED);
+  const metadata = result.metadata as {
+    verification: { outcome: DiscordBotRemovalVerificationOutcome };
+    error: { code: DiscordExecutionErrorCode; retryable: boolean };
+  };
+  expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.UNKNOWN_ERROR);
+  expect(metadata.error.code).toBe(DiscordExecutionErrorCode.UNKNOWN_ERROR);
+  expect(metadata.error.retryable).toBe(false);
+});
+
 test('production service returns structured failure with bounded retry metadata', async () => {
   let callCount = 0;
   const operation: DiscordBotRemovalOperation = {
