@@ -87,6 +87,7 @@ export interface ProductionValidationReport {
   readonly guildId: string;
   readonly correlationId: string;
   readonly dryRun: boolean;
+  readonly readiness: LiveDrillReadinessResult;
   readonly startedAt: string;
   readonly finishedAt: string;
   readonly durationMs: number;
@@ -105,6 +106,10 @@ export interface ProductionValidationScenario {
   readonly botUserId: string;
   readonly correlationId: string;
   readonly allowLiveDiscordExecution?: boolean;
+  readonly testGuildConfirmed?: boolean;
+  readonly disposableBotConfirmed?: boolean;
+  readonly dryRunConfirmed?: boolean;
+  readonly operatorAcknowledgment?: string;
 }
 
 export interface ProductionValidationHarnessDependencies {
@@ -114,7 +119,37 @@ export interface ProductionValidationHarnessDependencies {
   readonly maxAttempts?: number;
 }
 
+export const LIVE_DRILL_OPERATOR_ACKNOWLEDGMENT = 'I_UNDERSTAND_THIS_WILL_CALL_DISCORD_TEST_GUILD_ONLY';
+
+export interface LiveDrillReadinessResult {
+  readonly ready: boolean;
+  readonly failedRequirements: readonly string[];
+  readonly warnings: readonly string[];
+  readonly scenarioId: string;
+  readonly guildId: string;
+  readonly correlationId: string;
+  readonly dryRunRequired: boolean;
+  readonly liveExecutionAllowed: boolean;
+}
+
+interface LiveDrillReadinessInput {
+  readonly scenario: ProductionValidationScenario;
+  readonly dependencies: ProductionValidationHarnessDependencies;
+}
+
 const VALIDATION_TIMESTAMP = '2026-06-28T00:00:01.000Z';
+
+const READINESS_REQUIREMENT_ALLOW_LIVE_OPT_IN = 'ALLOW_LIVE_DISCORD_EXECUTION_TRUE';
+const READINESS_REQUIREMENT_SCENARIO_ID = 'SCENARIO_ID_REQUIRED';
+const READINESS_REQUIREMENT_CORRELATION_ID = 'CORRELATION_ID_REQUIRED';
+const READINESS_REQUIREMENT_GUILD_ID = 'GUILD_ID_REQUIRED';
+const READINESS_REQUIREMENT_BOT_USER_ID = 'BOT_USER_ID_REQUIRED';
+const READINESS_REQUIREMENT_HTTP_CLIENT = 'PRODUCTION_DISCORD_HTTP_CLIENT_REQUIRED';
+const READINESS_REQUIREMENT_BOT_TOKEN = 'BOT_TOKEN_REQUIRED';
+const READINESS_REQUIREMENT_TEST_GUILD = 'TEST_GUILD_CONFIRMATION_REQUIRED';
+const READINESS_REQUIREMENT_DISPOSABLE_BOT = 'DISPOSABLE_BOT_CONFIRMATION_REQUIRED';
+const READINESS_REQUIREMENT_DRY_RUN = 'PRIOR_DRY_RUN_CONFIRMATION_REQUIRED';
+const READINESS_REQUIREMENT_OPERATOR_ACK = 'OPERATOR_ACKNOWLEDGMENT_REQUIRED';
 
 interface ValidationPipelineHarness {
   readonly detectionEngine: InMemoryDetectionEngine;
@@ -156,6 +191,14 @@ function deepFreeze<T>(value: T): T {
   return Object.freeze(value);
 }
 
+function freezeReadinessResult(result: LiveDrillReadinessResult): LiveDrillReadinessResult {
+  return deepFreeze({
+    ...result,
+    failedRequirements: Object.freeze([...result.failedRequirements]),
+    warnings: Object.freeze([...result.warnings]),
+  });
+}
+
 function freezeActionResult(result: ProductionValidationActionResult): ProductionValidationActionResult {
   return Object.freeze({
     actionType: result.actionType,
@@ -170,9 +213,79 @@ function freezeActionResult(result: ProductionValidationActionResult): Productio
 function freezeReport(report: ProductionValidationReport): ProductionValidationReport {
   return deepFreeze({
     ...report,
+    readiness: freezeReadinessResult(report.readiness),
     executionStagesCompleted: Object.freeze([...report.executionStagesCompleted]),
     actionResults: Object.freeze(report.actionResults.map((actionResult) => freezeActionResult(actionResult))),
   });
+}
+
+function hasNonEmptyValue(value: string | undefined): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+export class LiveDrillReadinessValidator {
+  validate(input: LiveDrillReadinessInput): LiveDrillReadinessResult {
+    const { scenario, dependencies } = input;
+    const failedRequirements: string[] = [];
+    const warnings: string[] = [];
+
+    if (scenario.allowLiveDiscordExecution !== true) {
+      failedRequirements.push(READINESS_REQUIREMENT_ALLOW_LIVE_OPT_IN);
+      warnings.push('Live execution is disabled unless allowLiveDiscordExecution=true is explicitly provided.');
+    }
+
+    if (!hasNonEmptyValue(scenario.scenarioId)) {
+      failedRequirements.push(READINESS_REQUIREMENT_SCENARIO_ID);
+    }
+
+    if (!hasNonEmptyValue(scenario.correlationId)) {
+      failedRequirements.push(READINESS_REQUIREMENT_CORRELATION_ID);
+    }
+
+    if (!hasNonEmptyValue(scenario.guildId)) {
+      failedRequirements.push(READINESS_REQUIREMENT_GUILD_ID);
+    }
+
+    if (!hasNonEmptyValue(scenario.botUserId)) {
+      failedRequirements.push(READINESS_REQUIREMENT_BOT_USER_ID);
+    }
+
+    if (!dependencies.productionDiscordHttpClient) {
+      failedRequirements.push(READINESS_REQUIREMENT_HTTP_CLIENT);
+    }
+
+    if (!hasNonEmptyValue(dependencies.botToken)) {
+      failedRequirements.push(READINESS_REQUIREMENT_BOT_TOKEN);
+    }
+
+    if (scenario.testGuildConfirmed !== true) {
+      failedRequirements.push(READINESS_REQUIREMENT_TEST_GUILD);
+    }
+
+    if (scenario.disposableBotConfirmed !== true) {
+      failedRequirements.push(READINESS_REQUIREMENT_DISPOSABLE_BOT);
+    }
+
+    if (scenario.dryRunConfirmed !== true) {
+      failedRequirements.push(READINESS_REQUIREMENT_DRY_RUN);
+    }
+
+    if (scenario.operatorAcknowledgment !== LIVE_DRILL_OPERATOR_ACKNOWLEDGMENT) {
+      failedRequirements.push(READINESS_REQUIREMENT_OPERATOR_ACK);
+    }
+
+    const ready = failedRequirements.length === 0;
+    return freezeReadinessResult({
+      ready,
+      failedRequirements: Object.freeze(failedRequirements),
+      warnings: Object.freeze(warnings),
+      scenarioId: scenario.scenarioId,
+      guildId: scenario.guildId,
+      correlationId: scenario.correlationId,
+      dryRunRequired: true,
+      liveExecutionAllowed: ready && scenario.allowLiveDiscordExecution === true,
+    });
+  }
 }
 
 function readRecord(value: unknown): Record<string, unknown> | undefined {
@@ -445,13 +558,23 @@ function resolveVerificationOutcome(
 }
 
 export class ProductionValidationHarness {
-  constructor(private readonly dependencies: ProductionValidationHarnessDependencies = {}) {}
+  private readonly readinessValidator: LiveDrillReadinessValidator;
+
+  constructor(private readonly dependencies: ProductionValidationHarnessDependencies = {}) {
+    this.readinessValidator = new LiveDrillReadinessValidator();
+  }
 
   async validate(scenario: ProductionValidationScenario): Promise<ProductionValidationReport> {
     const startedAtMs = Date.now();
     const pipeline = buildPipelineHarness(scenario);
     const context = buildPipelineContext(scenario);
-    const dryRun = !scenario.allowLiveDiscordExecution;
+    const liveModeRequested = scenario.allowLiveDiscordExecution === true;
+    const readiness = this.readinessValidator.validate({
+      scenario,
+      dependencies: this.dependencies,
+    });
+    const liveExecutionAllowed = liveModeRequested && readiness.liveExecutionAllowed;
+    const dryRun = !liveExecutionAllowed;
     const stageCompletion: ProductionValidationStage[] = [
       ProductionValidationStage.DETECTION,
       ProductionValidationStage.THREAT_INTERPRETATION,
@@ -492,7 +615,7 @@ export class ProductionValidationHarness {
     const dryRunIdempotencyKey = `${executionPlan.planId}:${executionPlan.planId}:${botRoute?.route.routeId ?? 'unknown-route'}:${scenario.correlationId}`;
     let idempotencyKey = dryRunIdempotencyKey;
 
-    if (scenario.allowLiveDiscordExecution) {
+    if (liveExecutionAllowed) {
       if (!this.dependencies.productionDiscordHttpClient || !this.dependencies.botToken) {
         throw new Error('Production validation live mode requires allowLiveDiscordExecution=true, botToken, and productionDiscordHttpClient');
       }
@@ -560,6 +683,28 @@ export class ProductionValidationHarness {
       idempotencyKey = liveActionMetadata?.idempotencyKey ?? dryRunIdempotencyKey;
     }
 
+    if (liveModeRequested && !readiness.ready) {
+      const requirementMessage = readiness.failedRequirements.join(', ');
+      const finishedAtMs = Date.now();
+      return freezeReport({
+        scenarioId: scenario.scenarioId,
+        guildId: scenario.guildId,
+        correlationId: scenario.correlationId,
+        dryRun: true,
+        readiness,
+        startedAt: new Date(startedAtMs).toISOString(),
+        finishedAt: new Date(finishedAtMs).toISOString(),
+        durationMs: Math.max(0, finishedAtMs - startedAtMs),
+        executionStagesCompleted: Object.freeze(stageCompletion),
+        actionResults,
+        verificationOutcome: 'DRY_RUN',
+        idempotencyKey,
+        restRequestCount: 0,
+        success: false,
+        failureReason: `Live drill readiness gate failed: ${requirementMessage}`,
+      });
+    }
+
     const finishedAtMs = Date.now();
     const botActionResult = actionResults.find((result) => result.actionType === SecurityActionType.REMOVE_UNAUTHORIZED_BOT);
     const success = botActionResult?.status === ProductionValidationActionStatus.SUCCEEDED || botActionResult?.status === ProductionValidationActionStatus.DRY_RUN;
@@ -570,6 +715,7 @@ export class ProductionValidationHarness {
       guildId: scenario.guildId,
       correlationId: scenario.correlationId,
       dryRun,
+      readiness,
       startedAt: new Date(startedAtMs).toISOString(),
       finishedAt: new Date(finishedAtMs).toISOString(),
       durationMs: Math.max(0, finishedAtMs - startedAtMs),
