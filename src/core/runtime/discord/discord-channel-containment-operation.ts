@@ -22,6 +22,7 @@ type FetchLike = (
   init: {
     method: string;
     headers: Record<string, string>;
+    body?: string;
   },
 ) => Promise<FetchLikeResponse>;
 

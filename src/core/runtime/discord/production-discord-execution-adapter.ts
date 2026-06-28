@@ -37,6 +37,7 @@ export interface ProductionDiscordHttpRequest {
   readonly method: string;
   readonly url: string;
   readonly headers: Record<string, string>;
+  readonly body?: string;
 }
 
 export interface ProductionDiscordHttpResponse {
@@ -75,6 +76,7 @@ function toOperationOptions(
         method: init.method,
         url: input,
         headers: Object.freeze({ ...init.headers }),
+        body: init.body,
       }),
     );
 
@@ -99,6 +101,7 @@ function toRoleOperationOptions(
         method: init.method,
         url: input,
         headers: Object.freeze({ ...init.headers }),
+        body: init.body,
       }),
     );
 
@@ -129,6 +132,7 @@ function toWebhookOperationOptions(
         method: init.method,
         url: input,
         headers: Object.freeze({ ...init.headers }),
+        body: init.body,
       }),
     );
 
@@ -153,6 +157,7 @@ function toChannelContainmentOperationOptions(
         method: init.method,
         url: input,
         headers: Object.freeze({ ...init.headers }),
+        body: init.body,
       }),
     );
 
@@ -177,6 +182,7 @@ function toPermissionOverwriteOperationOptions(
         method: init.method,
         url: input,
         headers: Object.freeze({ ...init.headers }),
+        body: init.body,
       }),
     );
 
