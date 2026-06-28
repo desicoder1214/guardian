@@ -3,6 +3,10 @@ import {
   ActionExecutionResult,
   ExecutionContext,
   ExecutionState,
+  SecurityDomainExecutionRequest,
+  SecurityDomainExecutionResult,
+  SecurityExecutorCapability,
+  SecurityExecutorDomain,
   ExecutorCapabilities,
   ExecutionPriority,
   RollbackCapable,
@@ -13,6 +17,42 @@ export interface SecurityActionExecutor extends RollbackCapable {
   readonly capabilities: ExecutorCapabilities;
   supports(action: SecurityAction): boolean;
   execute(context: ExecutionContext, action: SecurityAction): Promise<ActionExecutionResult>;
+}
+
+export interface SecurityDomainExecutorContract {
+  readonly executorId: string;
+  readonly domain: SecurityExecutorDomain;
+  readonly supportedCapabilities: readonly SecurityExecutorCapability[];
+  supports(capability: SecurityExecutorCapability): boolean;
+  prepare(request: SecurityDomainExecutionRequest): SecurityDomainExecutionResult;
+}
+
+export interface SecurityBotExecutor extends SecurityDomainExecutorContract {
+  readonly domain: SecurityExecutorDomain.BOT;
+}
+
+export interface SecurityRoleExecutor extends SecurityDomainExecutorContract {
+  readonly domain: SecurityExecutorDomain.ROLE;
+}
+
+export interface SecurityMemberExecutor extends SecurityDomainExecutorContract {
+  readonly domain: SecurityExecutorDomain.MEMBER;
+}
+
+export interface SecurityChannelExecutor extends SecurityDomainExecutorContract {
+  readonly domain: SecurityExecutorDomain.CHANNEL;
+}
+
+export interface SecurityWebhookExecutor extends SecurityDomainExecutorContract {
+  readonly domain: SecurityExecutorDomain.WEBHOOK;
+}
+
+export interface SecurityGuildExecutor extends SecurityDomainExecutorContract {
+  readonly domain: SecurityExecutorDomain.GUILD;
+}
+
+export interface SecurityIntegrationExecutor extends SecurityDomainExecutorContract {
+  readonly domain: SecurityExecutorDomain.INTEGRATION;
 }
 
 export class InMemoryNoopExecutor implements SecurityActionExecutor {

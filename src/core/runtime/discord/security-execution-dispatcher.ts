@@ -1,10 +1,22 @@
 import {
+  SecurityDomainExecutionRequest,
+  SecurityDomainExecutionResult,
+  SecurityExecutionCapabilityResolver,
   SecurityExecutionDispatchIntent,
   SecurityExecutionDispatchResult,
   SecurityExecutionDispatcher,
   SecurityExecutionRouteDecision,
   SecurityExecutionRoutingResult,
+  SecurityExecutionStrategy,
+  SecurityExecutionStrategyResolution,
+  SecurityExecutionStrategyResolver,
 } from './security-execution-types';
+import {
+  InMemorySecurityDomainExecutorRegistry,
+  SecurityDomainExecutorRegistry,
+} from './security-action-executor-registry';
+import { InMemorySecurityExecutionCapabilityResolver } from './security-execution-capability-resolver';
+import { InMemorySecurityExecutionStrategyResolver } from './security-execution-strategy';
 
 function freezeMetadata(metadata?: Record<string, unknown>): Record<string, unknown> | undefined {
   return metadata ? Object.freeze({ ...metadata }) : undefined;
@@ -37,32 +49,148 @@ function freezeIntent(intent: SecurityExecutionDispatchIntent): SecurityExecutio
       }),
     }),
     dispatchDecision: intent.dispatchDecision,
+    targetedDomain: intent.targetedDomain,
+    targetedCapability: intent.targetedCapability,
+    executionStrategy: intent.executionStrategy ? freezeStrategy(intent.executionStrategy) : undefined,
+    strategyResolutionReason: intent.strategyResolutionReason,
+    executionRequest: intent.executionRequest
+      ? Object.freeze({
+          ...intent.executionRequest,
+          route: Object.freeze({ ...intent.executionRequest.route }),
+          metadata: freezeMetadata(intent.executionRequest.metadata),
+        })
+      : undefined,
+    executionResult: intent.executionResult
+      ? Object.freeze({
+          ...intent.executionResult,
+          metadata: freezeMetadata(intent.executionResult.metadata),
+        })
+      : undefined,
     metadata: freezeMetadata(intent.metadata),
   });
 }
 
+function freezeRetryPolicy(policy: SecurityExecutionStrategy['retryPolicy']): SecurityExecutionStrategy['retryPolicy'] {
+  return Object.freeze({
+    eligible: policy.eligible,
+    maxAttempts: policy.maxAttempts,
+    backoff: policy.backoff,
+    metadata: freezeMetadata(policy.metadata),
+  });
+}
+
+function freezeStrategy(strategy: SecurityExecutionStrategy): SecurityExecutionStrategy {
+  return Object.freeze({
+    actionType: strategy.actionType,
+    lane: strategy.lane,
+    dispatchMode: strategy.dispatchMode,
+    retryPolicy: freezeRetryPolicy(strategy.retryPolicy),
+    idempotencyPolicy: strategy.idempotencyPolicy,
+    orderingConstraint: strategy.orderingConstraint,
+    parallelizable: strategy.parallelizable,
+    hotPathSafe: strategy.hotPathSafe,
+    backgroundSafe: strategy.backgroundSafe,
+    metadata: freezeMetadata(strategy.metadata),
+  });
+}
+
+function freezeRequest(request: SecurityDomainExecutionRequest): SecurityDomainExecutionRequest {
+  return Object.freeze({
+    ...request,
+    route: Object.freeze({ ...request.route }),
+    metadata: freezeMetadata(request.metadata),
+  });
+}
+
+function freezeResult(result: SecurityDomainExecutionResult): SecurityDomainExecutionResult {
+  return Object.freeze({
+    ...result,
+    metadata: freezeMetadata(result.metadata),
+  });
+}
+
 export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDispatcher {
+  constructor(
+    private readonly domainExecutorRegistry: SecurityDomainExecutorRegistry = new InMemorySecurityDomainExecutorRegistry(),
+    private readonly capabilityResolver: SecurityExecutionCapabilityResolver = new InMemorySecurityExecutionCapabilityResolver(),
+    private readonly strategyResolver: SecurityExecutionStrategyResolver = new InMemorySecurityExecutionStrategyResolver(),
+  ) {}
+
   dispatch(routingResult: SecurityExecutionRoutingResult): SecurityExecutionDispatchResult {
-    const intents = Object.freeze(
-      routingResult.routes.map((route) =>
-        freezeIntent({
+    const intents = routingResult.routes.map((route) => {
+      const resolution = this.capabilityResolver.resolve(route.actionType);
+      const strategyResolution: SecurityExecutionStrategyResolution = this.strategyResolver.resolve(route.actionType);
+      const targetedDomain = resolution.domain;
+      const targetedCapability = resolution.capability;
+      const executionStrategy = strategyResolution.strategy ? freezeStrategy(strategyResolution.strategy) : undefined;
+
+      if (
+        route.decision !== SecurityExecutionRouteDecision.EXECUTABLE ||
+        !resolution.resolved ||
+        !targetedDomain ||
+        !targetedCapability
+      ) {
+        return freezeIntent({
           route,
           dispatchDecision: route.decision,
+          targetedDomain,
+          targetedCapability,
+          executionStrategy,
+          strategyResolutionReason: strategyResolution.reason,
           metadata: Object.freeze({
             source: 'in-memory-security-execution-dispatcher',
             routeReason: route.reason,
+            resolutionReason: resolution.reason,
           }),
-        }),
-      ),
-    );
+        });
+      }
 
-    const executableIntentCount = intents.filter(
+      const executor = this.domainExecutorRegistry.resolve(targetedDomain, targetedCapability);
+      const request = freezeRequest({
+        route,
+        planId: routingResult.planId,
+        executionPlanId: routingResult.executionPlanId,
+        correlationId: routingResult.correlationId,
+        domain: targetedDomain,
+        capability: targetedCapability,
+        metadata: Object.freeze({ source: 'in-memory-security-execution-dispatcher' }),
+      });
+
+      const executionResult = executor
+        ? freezeResult(executor.prepare(request))
+        : freezeResult({
+            domain: targetedDomain,
+            capability: targetedCapability,
+            accepted: false,
+            reason: 'INTENT_REJECTED',
+            metadata: Object.freeze({ reason: 'no-domain-executor-registered' }),
+          });
+
+      return freezeIntent({
+        route,
+        dispatchDecision: route.decision,
+        targetedDomain,
+        targetedCapability,
+        executionStrategy,
+        strategyResolutionReason: strategyResolution.reason,
+        executionRequest: request,
+        executionResult,
+        metadata: Object.freeze({
+          source: 'in-memory-security-execution-dispatcher',
+          routeReason: route.reason,
+        }),
+      });
+    });
+
+    const immutableIntents = Object.freeze(intents.map((intent) => freezeIntent(intent)));
+
+    const executableIntentCount = immutableIntents.filter(
       (intent) => intent.dispatchDecision === SecurityExecutionRouteDecision.EXECUTABLE,
     ).length;
-    const deferredIntentCount = intents.filter(
+    const deferredIntentCount = immutableIntents.filter(
       (intent) => intent.dispatchDecision === SecurityExecutionRouteDecision.DEFERRED,
     ).length;
-    const skippedIntentCount = intents.filter(
+    const skippedIntentCount = immutableIntents.filter(
       (intent) => intent.dispatchDecision === SecurityExecutionRouteDecision.SKIPPED,
     ).length;
 
@@ -70,7 +198,7 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
       planId: routingResult.planId,
       executionPlanId: routingResult.executionPlanId,
       correlationId: routingResult.correlationId,
-      intents,
+      intents: immutableIntents,
       metadata: Object.freeze({
         source: 'in-memory-security-execution-dispatcher',
         executableIntentCount,

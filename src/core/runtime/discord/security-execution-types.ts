@@ -382,6 +382,12 @@ export interface SecurityExecutionRouter {
 export interface SecurityExecutionDispatchIntent {
   readonly route: SecurityExecutionRoute;
   readonly dispatchDecision: SecurityExecutionRouteDecision;
+  readonly targetedDomain?: SecurityExecutorDomain;
+  readonly targetedCapability?: SecurityExecutorCapability;
+  readonly executionStrategy?: SecurityExecutionStrategy;
+  readonly strategyResolutionReason?: SecurityExecutionStrategyResolutionReason;
+  readonly executionRequest?: SecurityDomainExecutionRequest;
+  readonly executionResult?: SecurityDomainExecutionResult;
   readonly metadata?: Record<string, unknown>;
 }
 
@@ -400,6 +406,160 @@ export interface SecurityExecutionDispatchResult {
 
 export interface SecurityExecutionDispatcher {
   dispatch(routingResult: SecurityExecutionRoutingResult): SecurityExecutionDispatchResult;
+}
+
+export enum SecurityExecutorDomain {
+  BOT = 'BOT',
+  ROLE = 'ROLE',
+  MEMBER = 'MEMBER',
+  CHANNEL = 'CHANNEL',
+  WEBHOOK = 'WEBHOOK',
+  GUILD = 'GUILD',
+  INTEGRATION = 'INTEGRATION',
+}
+
+export enum SecurityExecutorCapability {
+  REMOVE_UNAUTHORIZED_BOT = 'REMOVE_UNAUTHORIZED_BOT',
+  REMOVE_DANGEROUS_ROLE = 'REMOVE_DANGEROUS_ROLE',
+  NEUTRALIZE_ESCALATED_MEMBER = 'NEUTRALIZE_ESCALATED_MEMBER',
+  QUARANTINE_ACTOR = 'QUARANTINE_ACTOR',
+  PUNISH_ROLE_ESCALATION_ACTOR = 'PUNISH_ROLE_ESCALATION_ACTOR',
+  LOCK_CHANNELS = 'LOCK_CHANNELS',
+  FREEZE_WEBHOOKS = 'FREEZE_WEBHOOKS',
+  CREATE_INCIDENT = 'CREATE_INCIDENT',
+  NOTIFY_AUDIT = 'NOTIFY_AUDIT',
+  RESTORE_RESOURCE = 'RESTORE_RESOURCE',
+  ESCALATE = 'ESCALATE',
+  INVESTIGATE = 'INVESTIGATE',
+  REVOKE_ESCALATION_SOURCE = 'REVOKE_ESCALATION_SOURCE',
+}
+
+export interface SecurityExecutionTopologyEntry {
+  readonly actionType: SecurityActionType;
+  readonly domain: SecurityExecutorDomain;
+  readonly capability: SecurityExecutorCapability;
+}
+
+export interface SecurityExecutionTopology {
+  readonly entries: readonly SecurityExecutionTopologyEntry[];
+  readonly metadata: {
+    readonly source: 'in-memory-security-execution-topology-resolver';
+    readonly entryCount: number;
+  };
+}
+
+export enum SecurityExecutionTopologyResolutionReason {
+  RESOLVED = 'RESOLVED',
+  UNSUPPORTED_ACTION = 'UNSUPPORTED_ACTION',
+}
+
+export interface SecurityExecutionTopologyResolution {
+  readonly actionType: SecurityActionType;
+  readonly resolved: boolean;
+  readonly reason: SecurityExecutionTopologyResolutionReason;
+  readonly entry?: SecurityExecutionTopologyEntry;
+}
+
+export interface SecurityExecutionTopologyResolver {
+  getTopology(): SecurityExecutionTopology;
+  resolve(actionType: SecurityActionType): SecurityExecutionTopologyResolution;
+}
+
+export enum SecurityExecutionDispatchMode {
+  FIRE_AND_FORGET = 'FIRE_AND_FORGET',
+  AWAIT_ACK = 'AWAIT_ACK',
+}
+
+export interface SecurityExecutionRetryPolicy {
+  readonly eligible: boolean;
+  readonly maxAttempts: number;
+  readonly backoff: 'NONE' | 'LINEAR' | 'EXPONENTIAL';
+  readonly metadata?: Record<string, unknown>;
+}
+
+export enum SecurityExecutionOrderingConstraint {
+  NONE = 'NONE',
+  HOT_PATH_SEQUENCE = 'HOT_PATH_SEQUENCE',
+  AFTER_CONTAINMENT = 'AFTER_CONTAINMENT',
+}
+
+export enum SecurityExecutionIdempotencyPolicy {
+  REQUIRED = 'REQUIRED',
+  PREFERRED = 'PREFERRED',
+  NOT_REQUIRED = 'NOT_REQUIRED',
+}
+
+export interface SecurityExecutionStrategy {
+  readonly actionType: SecurityActionType;
+  readonly lane: SecurityHotPathExecutionLane;
+  readonly dispatchMode: SecurityExecutionDispatchMode;
+  readonly retryPolicy: SecurityExecutionRetryPolicy;
+  readonly idempotencyPolicy: SecurityExecutionIdempotencyPolicy;
+  readonly orderingConstraint: SecurityExecutionOrderingConstraint;
+  readonly parallelizable: boolean;
+  readonly hotPathSafe: boolean;
+  readonly backgroundSafe: boolean;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface SecurityExecutionStrategyProfile {
+  readonly strategies: readonly SecurityExecutionStrategy[];
+  readonly metadata: {
+    readonly source: 'in-memory-security-execution-strategy-resolver';
+    readonly strategyCount: number;
+  };
+}
+
+export enum SecurityExecutionStrategyResolutionReason {
+  RESOLVED = 'RESOLVED',
+  UNSUPPORTED_ACTION = 'UNSUPPORTED_ACTION',
+}
+
+export interface SecurityExecutionStrategyResolution {
+  readonly actionType: SecurityActionType;
+  readonly resolved: boolean;
+  readonly reason: SecurityExecutionStrategyResolutionReason;
+  readonly strategy?: SecurityExecutionStrategy;
+}
+
+export interface SecurityExecutionStrategyResolver {
+  getProfile(): SecurityExecutionStrategyProfile;
+  resolve(actionType: SecurityActionType): SecurityExecutionStrategyResolution;
+}
+
+export enum SecurityExecutionCapabilityResolutionReason {
+  RESOLVED = 'RESOLVED',
+  UNSUPPORTED_ACTION = 'UNSUPPORTED_ACTION',
+}
+
+export interface SecurityExecutionCapabilityResolution {
+  readonly actionType: SecurityActionType;
+  readonly resolved: boolean;
+  readonly reason: SecurityExecutionCapabilityResolutionReason;
+  readonly domain?: SecurityExecutorDomain;
+  readonly capability?: SecurityExecutorCapability;
+}
+
+export interface SecurityExecutionCapabilityResolver {
+  resolve(actionType: SecurityActionType): SecurityExecutionCapabilityResolution;
+}
+
+export interface SecurityDomainExecutionRequest {
+  readonly route: SecurityExecutionRoute;
+  readonly planId: string;
+  readonly executionPlanId: string;
+  readonly correlationId: string;
+  readonly domain: SecurityExecutorDomain;
+  readonly capability: SecurityExecutorCapability;
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface SecurityDomainExecutionResult {
+  readonly domain: SecurityExecutorDomain;
+  readonly capability: SecurityExecutorCapability;
+  readonly accepted: boolean;
+  readonly reason: 'INTENT_ACCEPTED' | 'INTENT_REJECTED';
+  readonly metadata?: Record<string, unknown>;
 }
 
 export interface ExecutionScheduler {
