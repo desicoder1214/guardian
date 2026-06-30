@@ -196,26 +196,38 @@ function findingTypeRank(type: SecurityReconciliationFindingType): number {
   switch (type) {
     case SecurityReconciliationFindingType.UNAUTHORIZED_BOT:
       return 0;
-    case SecurityReconciliationFindingType.WEBHOOK_HIGH_RISK:
+    case SecurityReconciliationFindingType.PRIVILEGE_ESCALATION:
       return 1;
-    case SecurityReconciliationFindingType.WEBHOOK_ORPHANED:
+    case SecurityReconciliationFindingType.DUPLICATE_BOT_IDENTITY:
       return 2;
-    case SecurityReconciliationFindingType.WEBHOOK_SUSPICIOUS:
+    case SecurityReconciliationFindingType.MISSING_AUTHORIZED_BOT:
       return 3;
-    case SecurityReconciliationFindingType.WEBHOOK_NEW:
+    case SecurityReconciliationFindingType.ORPHANED_TRUSTED_BOT:
       return 4;
-    case SecurityReconciliationFindingType.WEBHOOK_MODIFIED:
+    case SecurityReconciliationFindingType.REGISTRY_MISMATCH:
       return 5;
-    case SecurityReconciliationFindingType.WEBHOOK_DELETED:
+    case SecurityReconciliationFindingType.SNAPSHOT_INCONSISTENCY:
       return 6;
-    case SecurityReconciliationFindingType.PRIVILEGED_ROLE_DRIFT:
+    case SecurityReconciliationFindingType.WEBHOOK_HIGH_RISK:
       return 7;
-    case SecurityReconciliationFindingType.PERMISSION_DRIFT:
+    case SecurityReconciliationFindingType.WEBHOOK_ORPHANED:
       return 8;
-    case SecurityReconciliationFindingType.SNAPSHOT_MISMATCH:
+    case SecurityReconciliationFindingType.WEBHOOK_SUSPICIOUS:
       return 9;
-    default:
+    case SecurityReconciliationFindingType.WEBHOOK_NEW:
       return 10;
+    case SecurityReconciliationFindingType.WEBHOOK_MODIFIED:
+      return 11;
+    case SecurityReconciliationFindingType.WEBHOOK_DELETED:
+      return 12;
+    case SecurityReconciliationFindingType.PRIVILEGED_ROLE_DRIFT:
+      return 13;
+    case SecurityReconciliationFindingType.PERMISSION_DRIFT:
+      return 14;
+    case SecurityReconciliationFindingType.SNAPSHOT_MISMATCH:
+      return 15;
+    default:
+      return 16;
   }
 }
 
@@ -244,7 +256,18 @@ function toSchedulingActions(
 ): readonly SecurityReconciliationSchedulingAction[] {
   switch (finding.type) {
     case SecurityReconciliationFindingType.UNAUTHORIZED_BOT:
+    case SecurityReconciliationFindingType.PRIVILEGE_ESCALATION:
       return Object.freeze([SecurityReconciliationSchedulingAction.UNAUTHORIZED_BOT_CONTAINMENT]);
+    case SecurityReconciliationFindingType.DUPLICATE_BOT_IDENTITY:
+      return Object.freeze([
+        SecurityReconciliationSchedulingAction.UNAUTHORIZED_BOT_CONTAINMENT,
+        SecurityReconciliationSchedulingAction.INTEGRATION_EVALUATION,
+      ]);
+    case SecurityReconciliationFindingType.MISSING_AUTHORIZED_BOT:
+    case SecurityReconciliationFindingType.REGISTRY_MISMATCH:
+    case SecurityReconciliationFindingType.ORPHANED_TRUSTED_BOT:
+    case SecurityReconciliationFindingType.SNAPSHOT_INCONSISTENCY:
+      return Object.freeze([SecurityReconciliationSchedulingAction.INTEGRATION_EVALUATION]);
     case SecurityReconciliationFindingType.WEBHOOK_NEW:
     case SecurityReconciliationFindingType.WEBHOOK_MODIFIED:
     case SecurityReconciliationFindingType.WEBHOOK_DELETED:
