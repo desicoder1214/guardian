@@ -1,6 +1,7 @@
 import { EventBus, KernelEvent } from '../../event/bus';
 import { Logger } from '../logger';
 import { HealthService } from '../health';
+import { RuntimeGatewayProcessingGate } from '../lifecycle';
 import {
   DiscordGatewayRawEvent,
   DiscordGatewayNormalizedEvent,
@@ -32,6 +33,7 @@ export class InMemoryDiscordEventPipeline implements DiscordEventPipeline {
     private readonly eventBus: EventBus,
     private readonly health: HealthService,
     private readonly logger: Logger,
+    private readonly gatewayProcessingGate?: RuntimeGatewayProcessingGate,
     correlationIdGenerator?: CorrelationIdGenerator,
     normalizer?: DiscordEventNormalizer,
     router?: DiscordEventRouter,
@@ -64,6 +66,13 @@ export class InMemoryDiscordEventPipeline implements DiscordEventPipeline {
   async ingest(raw: DiscordGatewayRawEvent): Promise<void> {
     if (!this.running) {
       throw new Error('pipeline not started');
+    }
+
+    if (
+      this.gatewayProcessingGate &&
+      !this.gatewayProcessingGate.isGatewayEventProcessingEnabled()
+    ) {
+      throw new Error('runtime not ready for gateway event processing');
     }
 
     const normalized: DiscordGatewayNormalizedEvent = this.normalizer.normalize(raw);

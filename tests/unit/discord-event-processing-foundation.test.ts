@@ -63,7 +63,15 @@ test('Raw gateway event reaches registered detector through pipeline foundation'
   detectorRegistry.register(detector);
 
   const router = new InMemoryDiscordEventRouter(detectorRegistry);
-  const pipeline = new InMemoryDiscordEventPipeline(eventBus, healthService, logger, undefined, undefined, router);
+  const pipeline = new InMemoryDiscordEventPipeline(
+    eventBus,
+    healthService,
+    logger,
+    undefined,
+    undefined,
+    undefined,
+    router,
+  );
   const gatewayAdapter = new InMemoryDiscordGatewayAdapter({
     source,
     pipeline,
