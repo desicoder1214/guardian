@@ -115,9 +115,13 @@ function toRoleOperationOptions(
 }
 
 function toServiceOptions(options: ProductionDiscordExecutionAdapterOptions): ProductionDiscordExecutionServiceOptions {
-  return Object.freeze({
-    maxAttempts: options.maxAttempts,
-  });
+  if (typeof options.maxAttempts === 'number' && Number.isFinite(options.maxAttempts)) {
+    return Object.freeze({
+      maxAttempts: options.maxAttempts,
+    });
+  }
+
+  return Object.freeze({});
 }
 
 function toWebhookOperationOptions(
