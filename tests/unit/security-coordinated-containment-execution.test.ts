@@ -404,6 +404,7 @@ test('ordered coordinated containment executes immediate actions before backgrou
   ]);
 
   expect(result.correlationId).toBe('corr-coord-1');
+  expect(result.executionPlanId).toBe(executionPlan.planId);
   expect(result.actionResults.every((item) => item.correlationId === 'corr-coord-1')).toBe(true);
   expect(result.failedActions).toEqual([]);
   expect(result.skippedDuplicateActions).toEqual([]);
@@ -416,9 +417,33 @@ test('ordered coordinated containment executes immediate actions before backgrou
     SecurityActionType.RESTORE_RESOURCE,
   ]);
 
+  const requestByActionType = new Map<SecurityActionType, ProductionDiscordHttpRequest>();
+  for (const request of requests) {
+    requestByActionType.set(classifyRequest(request), request);
+  }
+
+  expect(requestByActionType.get(SecurityActionType.REMOVE_UNAUTHORIZED_BOT)?.url).toBe(
+    'https://discord.example/api/v10/guilds/guild-coord-1/members/bot-user-1',
+  );
+  expect(requestByActionType.get(SecurityActionType.REMOVE_DANGEROUS_ROLE)?.url).toBe(
+    'https://discord.example/api/v10/guilds/guild-coord-1/members/member-1/roles/role-dangerous-1',
+  );
+  expect(requestByActionType.get(SecurityActionType.FREEZE_WEBHOOKS)?.url).toBe(
+    'https://discord.example/api/v10/webhooks/webhook-1',
+  );
+  expect(requestByActionType.get(SecurityActionType.LOCK_CHANNELS)?.url).toBe(
+    'https://discord.example/api/v10/channels/channel-1',
+  );
+  expect(requestByActionType.get(SecurityActionType.RESTORE_RESOURCE)?.url).toBe(
+    'https://discord.example/api/v10/channels/channel-1/permissions/overwrite-1',
+  );
+
   for (const item of result.actionResults.filter((entry) => entry.status === CoordinatedContainmentActionStatus.SUCCEEDED)) {
     const metadata = item.metadata as {
       metadata?: {
+        planId?: string;
+        executionPlanId?: string;
+        routeId?: string;
         threatAssessment?: unknown;
         securityDecision?: unknown;
         authorizationMetadata?: unknown;
@@ -427,9 +452,13 @@ test('ordered coordinated containment executes immediate actions before backgrou
     };
 
     expect(metadata.idempotencyKey).toBeDefined();
+    expect(metadata.metadata?.planId).toBe(result.planId);
+    expect(metadata.metadata?.executionPlanId).toBe(result.executionPlanId);
+    expect(metadata.metadata?.routeId).toEqual(expect.any(String));
     expect(metadata.metadata?.threatAssessment).toBeDefined();
     expect(metadata.metadata?.securityDecision).toBeDefined();
     expect(metadata.metadata?.authorizationMetadata).toBeDefined();
+    expect(item.actionType).toBeDefined();
   }
 
   expect(requests.every((request) => request.headers.Authorization === 'Bot test-token')).toBe(true);
