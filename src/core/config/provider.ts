@@ -41,7 +41,7 @@ export class EnvironmentConfigurationProvider<T extends object>
 
     for (const key of Object.keys(this.schema) as Array<keyof T>) {
       const field = this.schema[key];
-      const rawValue = this.source.get<string>(String(key));
+      const rawValue = this.resolveRawValue(String(key));
 
       if (rawValue === undefined || rawValue === null || rawValue === '') {
         if (field.default !== undefined) {
@@ -60,6 +60,31 @@ export class EnvironmentConfigurationProvider<T extends object>
     }
 
     return values as T;
+  }
+
+  private resolveRawValue(key: string): string | undefined {
+    // Canonical precedence is deterministic regardless of OS environment behavior:
+    // 1) exact schema key, 2) uppercase alias, 3) uppercase snake-case alias.
+    const candidates = this.buildEnvironmentCandidates(key);
+
+    for (const candidate of candidates) {
+      const value = this.source.get<string>(candidate);
+      if (value !== undefined) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  private buildEnvironmentCandidates(key: string): readonly string[] {
+    const upper = key.toUpperCase();
+    const upperSnake = key
+      .replace(/([a-z0-9])([A-Z])/g, '$1_$2')
+      .replace(/[-\s]+/g, '_')
+      .toUpperCase();
+
+    return Object.freeze([...new Set([key, upper, upperSnake])]);
   }
 
   private parseValue(value: string, type: ConfigurationSchema<T>[keyof T]['type']): unknown {
