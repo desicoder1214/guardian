@@ -257,7 +257,7 @@ test('unsupported executors are handled deterministically', () => {
 
   expect(result.executorRegistryResult.actionResolutions.some((resolution) => resolution.reason === SecurityExecutorResolutionReason.NO_PROVIDER_REGISTERED)).toBe(true);
   expect(result.routingResult.routes.some((route) => route.decision === 'SKIPPED')).toBe(true);
-  expect(result.dispatchResult.intents.every((intent) => intent.executionRequest === undefined || intent.executionResult?.accepted === false)).toBe(true);
+  expect(result.dispatchResult.intents.every((intent) => intent.executionResult?.accepted !== true)).toBe(true);
 });
 
 test('orchestration is idempotent and avoids duplicated execution preparation', () => {

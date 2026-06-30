@@ -263,10 +263,18 @@ function dependencyForFinding(
   switch (finding.type) {
     case SecurityReconciliationFindingType.UNAUTHORIZED_BOT:
     case SecurityReconciliationFindingType.PRIVILEGE_ESCALATION:
+    case SecurityReconciliationFindingType.DUPLICATE_BOT_IDENTITY:
       return Object.freeze({
         actionType: SecurityActionType.REMOVE_UNAUTHORIZED_BOT,
         dependencyRank: 0,
         policy: SecurityStartupExecutionBatchPolicy.UNAUTHORIZED_BOT_FIRST,
+      });
+    case SecurityReconciliationFindingType.MISSING_AUTHORIZED_BOT:
+    case SecurityReconciliationFindingType.ORPHANED_TRUSTED_BOT:
+      return Object.freeze({
+        actionType: SecurityActionType.CREATE_INCIDENT,
+        dependencyRank: 4,
+        policy: SecurityStartupExecutionBatchPolicy.AUDIT_LAST,
       });
     case SecurityReconciliationFindingType.WEBHOOK_HIGH_RISK:
     case SecurityReconciliationFindingType.WEBHOOK_ORPHANED:

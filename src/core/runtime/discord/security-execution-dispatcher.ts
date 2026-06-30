@@ -10,6 +10,8 @@ import {
   SecurityExecutionStrategy,
   SecurityExecutionStrategyResolution,
   SecurityExecutionStrategyResolver,
+  SecurityExecutorCapability,
+  SecurityExecutorDomain,
 } from './security-execution-types';
 import {
   InMemorySecurityDomainExecutorRegistry,
@@ -123,6 +125,21 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
       const targetedDomain = resolution.domain;
       const targetedCapability = resolution.capability;
       const executionStrategy = strategyResolution.strategy ? freezeStrategy(strategyResolution.strategy) : undefined;
+      const securityDecision = route.authorizationResult.authorizationRequirements[0]?.decision;
+      const request = freezeRequest({
+        route,
+        planId: routingResult.planId,
+        executionPlanId: routingResult.executionPlanId,
+        correlationId: routingResult.correlationId,
+        domain: targetedDomain ?? SecurityExecutorDomain.GUILD,
+        capability: targetedCapability ?? SecurityExecutorCapability.CREATE_INCIDENT,
+        metadata: Object.freeze({
+          source: 'in-memory-security-execution-dispatcher',
+          threatAssessment: route.authorizationResult.threatAssessment,
+          securityDecision,
+          authorizationMetadata: route.authorizationResult.metadata,
+        }),
+      });
 
       if (
         route.decision !== SecurityExecutionRouteDecision.EXECUTABLE ||
@@ -137,6 +154,7 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
           targetedCapability,
           executionStrategy,
           strategyResolutionReason: strategyResolution.reason,
+          executionRequest: request,
           metadata: Object.freeze({
             source: 'in-memory-security-execution-dispatcher',
             routeReason: route.reason,
@@ -146,21 +164,6 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
       }
 
       const executor = this.domainExecutorRegistry.resolve(targetedDomain, targetedCapability);
-      const securityDecision = route.authorizationResult.authorizationRequirements[0]?.decision;
-      const request = freezeRequest({
-        route,
-        planId: routingResult.planId,
-        executionPlanId: routingResult.executionPlanId,
-        correlationId: routingResult.correlationId,
-        domain: targetedDomain,
-        capability: targetedCapability,
-        metadata: Object.freeze({
-          source: 'in-memory-security-execution-dispatcher',
-          threatAssessment: route.authorizationResult.threatAssessment,
-          securityDecision,
-          authorizationMetadata: route.authorizationResult.metadata,
-        }),
-      });
 
       const executionResult = executor
         ? freezeResult(executor.prepare(request))
