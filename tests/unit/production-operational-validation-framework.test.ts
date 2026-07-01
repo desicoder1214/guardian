@@ -95,6 +95,28 @@ describe('InMemoryProductionOperationalValidationFramework', () => {
     }
   });
 
+  test('enforces expected threat, decision, and route classification per scenario', async () => {
+    const framework = new InMemoryProductionOperationalValidationFramework({
+      clock: new FixedClock([1700000000250, 1700000000260]),
+    });
+
+    const report = await framework.validate(createRequest({ validationId: 'scenario-classification-1' }));
+
+    const expectedByScenario = new Map(
+      DEFAULT_OPERATIONAL_VALIDATION_SCENARIOS.map((scenario) => [scenario.scenario, scenario]),
+    );
+
+    for (const scenarioResult of report.scenarioResults) {
+      const expected = expectedByScenario.get(scenarioResult.scenario);
+      expect(expected).toBeDefined();
+      expect(scenarioResult.detectionResult.detected).toBe(true);
+      expect(scenarioResult.detectionResult.findingCount).toBeGreaterThan(0);
+      expect(scenarioResult.threatLevel).toBe(expected?.expectedThreatSeverity);
+      expect(scenarioResult.decision).toBe(expected?.expectedDecision);
+      expect(scenarioResult.routeSelected.decision).toBe(expected?.expectedRouteDecision);
+    }
+  });
+
   test('enforces authorization success and reports authorization failure deterministically', async () => {
     const framework = new InMemoryProductionOperationalValidationFramework({
       clock: new FixedClock([1700000000300, 1700000000310]),
