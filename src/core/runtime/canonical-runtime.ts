@@ -620,6 +620,99 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return this.readString(memberUser, 'id', 'userId', 'user_id');
   }
 
+  private readMemberUserId(payload: unknown): string | undefined {
+    const record = this.readRecord(payload);
+    const direct = this.readString(
+      record,
+      'memberUserId',
+      'member_user_id',
+      'memberId',
+      'member_id',
+      'targetUserId',
+      'target_user_id',
+      'targetId',
+      'target_id',
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const target = this.readRecord(record?.target);
+    const targetId = this.readString(target, 'userId', 'user_id', 'id');
+    if (targetId) {
+      return targetId;
+    }
+
+    const member = this.readRecord(record?.member);
+    const memberId = this.readString(member, 'userId', 'user_id', 'id');
+    if (memberId) {
+      return memberId;
+    }
+
+    const memberUser = this.readRecord(member?.user);
+    const memberUserId = this.readString(memberUser, 'id', 'userId', 'user_id');
+    if (memberUserId) {
+      return memberUserId;
+    }
+
+    const user = this.readRecord(record?.user);
+    return this.readString(user, 'id', 'userId', 'user_id');
+  }
+
+  private readRoleId(payload: unknown): string | undefined {
+    const record = this.readRecord(payload);
+    const direct = this.readString(
+      record,
+      'roleId',
+      'role_id',
+      'dangerousRoleId',
+      'dangerous_role_id',
+      'targetRoleId',
+      'target_role_id',
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const role = this.readRecord(record?.role);
+    const roleId = this.readString(role, 'id', 'roleId', 'role_id');
+    if (roleId) {
+      return roleId;
+    }
+
+    const after = this.readRecord(record?.after);
+    const afterRole = this.readRecord(after?.role);
+    return this.readString(afterRole, 'id', 'roleId', 'role_id');
+  }
+
+  private readRoleContainmentPolicy(payload: unknown): {
+    readonly punishActor: boolean;
+    readonly neutralizeTarget: boolean;
+    readonly protectedRole: boolean;
+  } {
+    const record = this.readRecord(payload);
+    const policy = this.readRecord(record?.policy);
+
+    const punishActor =
+      this.readBoolean(policy, 'punishActor', 'punish_actor') ??
+      this.readBoolean(record, 'policyPunishActor', 'policy_punish_actor') ??
+      true;
+    const neutralizeTarget =
+      this.readBoolean(policy, 'neutralizeTarget', 'neutralize_target') ??
+      this.readBoolean(record, 'policyNeutralizeTarget', 'policy_neutralize_target') ??
+      true;
+    const protectedRole =
+      this.readBoolean(record, 'protectedRole', 'protected_role') ??
+      this.readBoolean(policy, 'protectedRole', 'protected_role') ??
+      false;
+
+    return Object.freeze({
+      punishActor,
+      neutralizeTarget,
+      protectedRole,
+    });
+  }
+
   private readBoolean(record: Record<string, unknown> | undefined, ...keys: string[]): boolean | undefined {
     if (!record) {
       return undefined;
@@ -680,11 +773,18 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
   private buildReplaySuppressionKey(
     event: DiscordGatewayNormalizedEvent,
+    actionType: PolicyActionType,
     actorId: string,
     botId: string | undefined,
+    memberUserId: string | undefined,
+    roleId: string | undefined,
   ): string {
     if (botId) {
       return ['bot-add', this.guildId, botId, actorId].join(':');
+    }
+
+    if (actionType === PolicyActionType.ROLE_CREATE && memberUserId && roleId) {
+      return ['role-grant', this.guildId, memberUserId, roleId, actorId].join(':');
     }
 
     return ['event', this.guildId, event.eventName, event.correlationId].join(':');
@@ -767,6 +867,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     event: DiscordGatewayNormalizedEvent,
     actorId: string,
     botId: string | undefined,
+    memberUserId: string | undefined,
+    roleId: string | undefined,
+    roleContainmentPolicy: {
+      readonly punishActor: boolean;
+      readonly neutralizeTarget: boolean;
+      readonly protectedRole: boolean;
+    },
     isBotAdd: boolean,
     unauthorizedBotDetected: boolean,
     isAuthorizedBot: boolean,
@@ -786,6 +893,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         actorId,
         botId,
         botUserId: botId,
+        memberUserId,
+        roleId,
         eventName: event.eventName,
         isBotAdd,
         unauthorizedBotDetected,
@@ -793,6 +902,14 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         trustedInviter,
         rogueInviterPunishmentPlanned: isBotAdd && unauthorizedBotDetected && !trustedInviter,
         webhookContainmentRequired: unauthorizedBotDetected,
+        policyPunishActor: roleContainmentPolicy.punishActor,
+        policyNeutralizeTarget: roleContainmentPolicy.neutralizeTarget,
+        protectedRole: roleContainmentPolicy.protectedRole,
+        policy: Object.freeze({
+          punishActor: roleContainmentPolicy.punishActor,
+          neutralizeTarget: roleContainmentPolicy.neutralizeTarget,
+          protectedRole: roleContainmentPolicy.protectedRole,
+        }),
       }),
     });
   }
@@ -941,6 +1058,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     const actorId = this.readActorId(event.payload);
     const botId = this.readBotId(event.payload);
+    const memberUserId = this.readMemberUserId(event.payload);
+    const roleId = this.readRoleId(event.payload);
+    const roleContainmentPolicy = this.readRoleContainmentPolicy(event.payload);
     const botAddEvent = this.isBotAddEvent(event.eventName, event.payload);
 
     if (actionType === PolicyActionType.BOT_ADD && botAddEvent && !botId) {
@@ -957,7 +1077,14 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     }
 
     const nowMs = Date.now();
-    const replaySuppressionKey = this.buildReplaySuppressionKey(event, actorId, botId);
+    const replaySuppressionKey = this.buildReplaySuppressionKey(
+      event,
+      actionType,
+      actorId,
+      botId,
+      memberUserId,
+      roleId,
+    );
     if (this.hasReplaySuppressionKey(replaySuppressionKey, nowMs)) {
       this.logger.warn('Canonical Guardian replay suppressed', {
         runtimeId: this.runtimeId,
@@ -1011,6 +1138,23 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       matchedDetectorCount: detectionResults.filter((result) => result.matched).length,
     });
 
+    if (
+      actionType === PolicyActionType.ROLE_CREATE &&
+      !detectionResults.some((result) => result.detectorId === 'dangerous-role-grant-detector' && result.matched)
+    ) {
+      this.logger.info('Canonical Guardian dangerous role containment not required', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        actorId,
+        memberUserId,
+        roleId,
+      });
+      return;
+    }
+
     this.securityEvaluationPipeline.stageDetectionResults(detectionResults);
     const decision = await this.securityEvaluationPipeline.evaluate(event, actorId, actionType);
     const botDetectionMetadata = this.readUnauthorizedBotDetectionMetadata(detectionResults);
@@ -1019,6 +1163,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       event,
       actorId,
       botId,
+      memberUserId,
+      roleId,
+      roleContainmentPolicy,
       botAddEvent,
       botDetectionMetadata.unauthorizedBotDetected,
       botDetectionMetadata.isAuthorizedBot,

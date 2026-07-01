@@ -143,6 +143,53 @@ test('BLOCK plans bot removal, webhook freeze, and audit actions', () => {
   expect(plan.metadata?.threatAssessment?.severity).toBe(DetectionSeverity.CRITICAL);
 });
 
+test('BLOCK on ROLE_CREATE plans dangerous role containment and policy-driven actions', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.ROLE_CREATE,
+    metadata: {
+      source: 'test',
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([
+    SecurityActionType.REMOVE_DANGEROUS_ROLE,
+    SecurityActionType.PUNISH_ROLE_ESCALATION_ACTOR,
+    SecurityActionType.NEUTRALIZE_ESCALATED_MEMBER,
+    SecurityActionType.CREATE_INCIDENT,
+    SecurityActionType.NOTIFY_AUDIT,
+  ]);
+});
+
+test('protected role skips punishment and neutralization actions', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.ROLE_CREATE,
+    metadata: {
+      source: 'test',
+      protectedRole: true,
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([
+    SecurityActionType.REMOVE_DANGEROUS_ROLE,
+    SecurityActionType.CREATE_INCIDENT,
+    SecurityActionType.NOTIFY_AUDIT,
+  ]);
+});
+
 test('no duplicate actions are produced', () => {
   const planner = new InMemorySecurityActionPlanner();
   const plan = planner.plan(buildDecision(SecurityDecision.BLOCK));

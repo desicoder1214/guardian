@@ -533,3 +533,318 @@ describe('IntegratedCanonicalGuardianRuntime unauthorized bot vertical slice', (
     expect(recoverySpy).toHaveBeenCalled();
   });
 });
+
+describe('IntegratedCanonicalGuardianRuntime dangerous role grant vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_TRUSTED_INVITER_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildDangerousRoleGrantEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      t: 'GUILD_MEMBER_UPDATE',
+      d: {
+        guildId: 'guild-role-slice-1',
+        actorId: 'actor-role-slice-1',
+        memberUserId: 'member-role-slice-1',
+        roleId: 'role-dangerous-slice-1',
+        beforePermissions: ['VIEW_CHANNEL'],
+        afterPermissions: ['VIEW_CHANNEL', 'ADMINISTRATOR'],
+        ...overrides,
+      },
+      ts: '2026-07-01T14:00:00.000Z',
+    };
+  }
+
+  test('dangerous role grant executes containment through production role adapter path', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const plannerSpy = jest.spyOn(InMemorySecurityExecutionPlanner.prototype, 'plan');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-slice-1',
+      'guild-role-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildDangerousRoleGrantEvent());
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    const calls = fetchSpy.mock.calls as unknown as Array<[
+      string,
+      { method: string; headers?: Record<string, string> },
+    ]>;
+    const roleCall = calls.find((call) => call[0].includes('/roles/role-dangerous-slice-1'));
+
+    expect(roleCall).toBeDefined();
+    const roleUrl = roleCall?.[0] ?? '';
+    const roleInit = roleCall?.[1] ?? { method: '' };
+    expect(roleUrl).toContain('/api/v10/guilds/guild-role-slice-1/members/member-role-slice-1/roles/role-dangerous-slice-1');
+    expect(roleInit.method).toBe('DELETE');
+
+    const planCall = plannerSpy.mock.calls[plannerSpy.mock.calls.length - 1];
+    const actionPlan = planCall[0] as { actions: readonly { type: SecurityActionType }[] };
+    expect(actionPlan.actions.map((action) => action.type)).toEqual([
+      SecurityActionType.REMOVE_DANGEROUS_ROLE,
+      SecurityActionType.PUNISH_ROLE_ESCALATION_ACTOR,
+      SecurityActionType.NEUTRALIZE_ESCALATED_MEMBER,
+      SecurityActionType.CREATE_INCIDENT,
+      SecurityActionType.NOTIFY_AUDIT,
+    ]);
+  });
+
+  test('normal onboarding role update does not execute containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-slice-2',
+      'guild-role-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildDangerousRoleGrantEvent({
+        roleId: 'role-onboarding-safe-1',
+        afterPermissions: ['VIEW_CHANNEL', 'SEND_MESSAGES'],
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('trusted actor does not bypass mandatory dangerous role containment', async () => {
+    process.env.GUARDIAN_TRUSTED_INVITER_IDS = 'trusted-admin-role-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-slice-3',
+      'guild-role-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildDangerousRoleGrantEvent({
+        actorId: 'trusted-admin-role-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  test('duplicate/replay dangerous role events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-slice-4',
+      'guild-role-slice-1',
+    );
+
+    const replayEvent = buildDangerousRoleGrantEvent({
+      actorId: 'actor-role-replay-1',
+      roleId: 'role-dangerous-replay-1',
+      memberUserId: 'member-role-replay-1',
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
+  });
+
+  test.each([403, 429, 500])(
+    'dangerous role containment failure (%i) triggers recovery scheduling',
+    async (statusCode) => {
+      const fetchSpy = jest.fn(async (url: string) => {
+        if (url.includes('/roles/')) {
+          return createFetchResponse(statusCode);
+        }
+
+        return createFetchResponse(204);
+      });
+      (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+      const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+      const eventBus = new InMemoryEventBus();
+      const health = new RuntimeHealthService();
+      const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+      const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+      const runtime = new IntegratedCanonicalGuardianRuntime(
+        GuardianRuntimeMode.PRODUCTION,
+        runtimeManager,
+        new StubDiscordRuntimeAdapter(),
+        eventBus,
+        health,
+        loggerFactory,
+        `runtime-role-slice-fail-${statusCode}`,
+        'guild-role-slice-1',
+      );
+
+      await runtime.start();
+      await runtime.ingestGatewayEvent(
+        buildDangerousRoleGrantEvent({
+          actorId: `actor-role-fail-${statusCode}`,
+          memberUserId: `member-role-fail-${statusCode}`,
+          roleId: `role-dangerous-fail-${statusCode}`,
+        }),
+      );
+      await runtime.stop();
+
+      expect(fetchSpy).toHaveBeenCalled();
+      expect(recoverySpy).toHaveBeenCalled();
+    },
+  );
+
+  test('role already removed (404) is treated as verified containment and does not trigger recovery', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/roles/')) {
+        return {
+          ...createFetchResponse(404),
+          json: async () => Object.freeze({ code: 'UNKNOWN_ROLE', message: 'Unknown Role' }),
+        };
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-slice-404',
+      'guild-role-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildDangerousRoleGrantEvent({
+        actorId: 'actor-role-404',
+        memberUserId: 'member-role-404',
+        roleId: 'role-dangerous-404',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).not.toHaveBeenCalled();
+  });
+
+  test('protected dangerous role respects policy by skipping punishment and neutralization', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const plannerSpy = jest.spyOn(InMemorySecurityExecutionPlanner.prototype, 'plan');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-slice-protected',
+      'guild-role-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildDangerousRoleGrantEvent({
+        roleId: 'role-protected-dangerous-1',
+        protectedRole: true,
+      }),
+    );
+    await runtime.stop();
+
+    const planCall = plannerSpy.mock.calls[plannerSpy.mock.calls.length - 1];
+    const actionPlan = planCall[0] as { actions: readonly { type: SecurityActionType }[] };
+    expect(actionPlan.actions.map((action) => action.type)).toEqual([
+      SecurityActionType.REMOVE_DANGEROUS_ROLE,
+      SecurityActionType.CREATE_INCIDENT,
+      SecurityActionType.NOTIFY_AUDIT,
+    ]);
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+});

@@ -65,6 +65,60 @@ const DECISION_ACTION_MATRIX: Record<SecurityDecision, readonly SecurityActionTy
   ],
 };
 
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readBoolean(record: Record<string, unknown> | undefined, ...keys: string[]): boolean | undefined {
+  if (!record) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'boolean') {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
+function resolveRoleEscalationActions(metadata: unknown): readonly SecurityActionType[] {
+  const metadataRecord = readRecord(metadata);
+  const protectedRole = readBoolean(metadataRecord, 'protectedRole', 'protected_role') === true;
+  const policyRecord = readRecord(metadataRecord?.policy);
+
+  const punishActor = readBoolean(
+    policyRecord,
+    'punishActor',
+    'punish_actor',
+  ) ?? readBoolean(metadataRecord, 'policyPunishActor', 'policy_punish_actor') ?? true;
+  const neutralizeTarget = readBoolean(
+    policyRecord,
+    'neutralizeTarget',
+    'neutralize_target',
+  ) ?? readBoolean(metadataRecord, 'policyNeutralizeTarget', 'policy_neutralize_target') ?? true;
+
+  const actions: SecurityActionType[] = [SecurityActionType.REMOVE_DANGEROUS_ROLE];
+
+  if (!protectedRole && punishActor) {
+    actions.push(SecurityActionType.PUNISH_ROLE_ESCALATION_ACTOR);
+  }
+
+  if (!protectedRole && neutralizeTarget) {
+    actions.push(SecurityActionType.NEUTRALIZE_ESCALATED_MEMBER);
+  }
+
+  actions.push(SecurityActionType.CREATE_INCIDENT, SecurityActionType.NOTIFY_AUDIT);
+
+  return Object.freeze(actions);
+}
+
 const ACTION_PRIORITY_MAP: Record<SecurityActionType, SecurityActionPriority> = {
   [SecurityActionType.NONE]: SecurityActionPriority.LOW,
   [SecurityActionType.INVESTIGATE]: SecurityActionPriority.NORMAL,
@@ -85,7 +139,11 @@ const ACTION_PRIORITY_MAP: Record<SecurityActionType, SecurityActionPriority> = 
 export class InMemorySecurityActionPlanner implements SecurityActionPlanner {
   plan(decisionModel: SecurityDecisionModel): SecurityActionPlan {
     const actionTypes = this.resolveActions(decisionModel.decision);
-    const uniqueActionTypes = [...new Set(actionTypes)];
+    const resolvedActionTypes =
+      decisionModel.decision === SecurityDecision.BLOCK && decisionModel.actionType === 'ROLE_CREATE'
+        ? resolveRoleEscalationActions(decisionModel.metadata)
+        : actionTypes;
+    const uniqueActionTypes = [...new Set(resolvedActionTypes)];
     const threatAssessment = this.readThreatAssessment(decisionModel.metadata);
     const actions = uniqueActionTypes.map((type, index) => {
       const metadata = Object.freeze({

@@ -34,6 +34,16 @@ export class DangerousRoleGrantDetector implements Detector {
     );
 
     const detected = this.supports(normalizedEvent.eventName) && grantedDangerousPermissions.length > 0;
+    const runtimeThreatOverrides = detected
+      ? Object.freeze([
+          Object.freeze({
+            type: 'FORCE_BLOCK',
+            applicableEventTypes: Object.freeze(['ROLE_CREATE']),
+            reason: 'mandatory dangerous role containment',
+            metadata: Object.freeze({ source: this.id() }),
+          }),
+        ])
+      : Object.freeze([]);
 
     return {
       detectorId: this.id(),
@@ -48,6 +58,7 @@ export class DangerousRoleGrantDetector implements Detector {
         afterPermissions: [...afterPermissions],
         newlyGrantedPermissions,
         grantedDangerousPermissions,
+        runtimeThreatOverrides,
       },
       correlationId: normalizedEvent.correlationId,
     };

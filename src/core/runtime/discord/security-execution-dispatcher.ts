@@ -32,6 +32,21 @@ function readRecord(value: unknown): Record<string, unknown> | undefined {
   return value as Record<string, unknown>;
 }
 
+function readString(record: Record<string, unknown> | undefined, ...keys: string[]): string | undefined {
+  if (!record) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
 function freezeIntent(intent: SecurityExecutionDispatchIntent): SecurityExecutionDispatchIntent {
   return Object.freeze({
     route: Object.freeze({
@@ -136,6 +151,22 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
       const securityDecision = route.authorizationResult.authorizationRequirements[0]?.decision;
       const authorizationMetadata = readRecord(route.authorizationResult.metadata);
       const securityDecisionMetadata = readRecord(authorizationMetadata?.securityDecisionMetadata);
+      const memberUserId = readString(
+        securityDecisionMetadata,
+        'memberUserId',
+        'member_user_id',
+        'memberId',
+        'member_id',
+        'targetUserId',
+        'target_user_id',
+      );
+      const roleId = readString(
+        securityDecisionMetadata,
+        'roleId',
+        'role_id',
+        'dangerousRoleId',
+        'dangerous_role_id',
+      );
       const request = freezeRequest({
         route,
         planId: routingResult.planId,
@@ -152,6 +183,8 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
           guildId: authorizationMetadata?.guildId,
           actorId: authorizationMetadata?.actorId,
           botId: authorizationMetadata?.botId,
+          ...(memberUserId ? { memberUserId } : {}),
+          ...(roleId ? { roleId } : {}),
           executionPlanId: routingResult.executionPlanId,
           securityDecisionMetadata,
         }),
