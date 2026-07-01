@@ -122,6 +122,7 @@ export class InMemorySecurityEvaluationPipeline implements DetectionAwareSecurit
       threshold: policy.threshold,
       observedCount: policy.observedCount,
       trustedActorIds: policy.trustedActorIds ?? [],
+      metadata: policy.metadata,
     };
   }
 

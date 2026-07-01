@@ -22,6 +22,13 @@ export class InMemorySecurityDecisionEngine implements SecurityDecisionEngine {
       return this.buildDecision(context, attribution, SecurityDecision.ALLOW, SecurityDecisionReason.TRUSTED_ACTOR);
     }
 
+    if (this.requiresFastPathPolicyEnforcement(policyDecision) && policyDecision.thresholdExceeded) {
+      const reason = policyDecision.decision === SecurityDecision.BLOCK
+        ? SecurityDecisionReason.POLICY_BLOCK
+        : SecurityDecisionReason.THRESHOLD_EXCEEDED;
+      return this.buildDecision(context, attribution, policyDecision.decision, reason);
+    }
+
     if (attribution.confidence === AuditAttributionConfidence.NONE || !attribution.actorId) {
       const reason = attribution.confidence === AuditAttributionConfidence.NONE
         ? SecurityDecisionReason.ATTRIBUTION_FAILED
@@ -52,7 +59,20 @@ export class InMemorySecurityDecisionEngine implements SecurityDecisionEngine {
   }
 
   private isTrustedActor(actorId: string, policyDecision: PolicyDecision): boolean {
+    if (this.requiresFastPathPolicyEnforcement(policyDecision)) {
+      return false;
+    }
+
     return Boolean(policyDecision.trustedActorIds?.includes(actorId));
+  }
+
+  private requiresFastPathPolicyEnforcement(policyDecision: PolicyDecision): boolean {
+    const metadata =
+      policyDecision.metadata && typeof policyDecision.metadata === 'object'
+        ? (policyDecision.metadata as Record<string, unknown>)
+        : undefined;
+
+    return metadata?.fastPathEnforcement === true;
   }
 
   private buildDecision(

@@ -78,6 +78,11 @@ function createResult(
   reason: AuthorizationReason,
   metadata?: Record<string, unknown>,
 ): SecurityExecutionAuthorizationResult {
+  const securityDecisionMetadata =
+    plan.securityDecision.metadata && typeof plan.securityDecision.metadata === 'object'
+      ? (plan.securityDecision.metadata as Record<string, unknown>)
+      : undefined;
+
   return Object.freeze({
     decision,
     reason,
@@ -87,7 +92,18 @@ function createResult(
     authorizationRequirements: Object.freeze(
       plan.authorizationRequirements.map((requirement) => freezeRequirement(requirement)),
     ),
-    metadata: metadata ? Object.freeze({ ...metadata }) : undefined,
+    metadata: Object.freeze({
+      ...(metadata ? { ...metadata } : {}),
+      runtimeId: securityDecisionMetadata?.runtimeId,
+      guildId: plan.securityDecision.guildId,
+      actorId: plan.securityDecision.actorId,
+      botId:
+        securityDecisionMetadata?.botId ??
+        securityDecisionMetadata?.botUserId ??
+        securityDecisionMetadata?.targetId,
+      executionPlanId: plan.planId,
+      securityDecisionMetadata,
+    }),
   });
 }
 

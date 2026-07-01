@@ -144,7 +144,7 @@ test('result is immutable and preserves metadata', () => {
 
   expect(Object.isFrozen(result)).toBe(true);
   expect(Object.isFrozen(result.authorizationRequirements)).toBe(true);
-  expect(result.metadata).toEqual({ source: 'in-memory-security-execution-authorization-engine' });
+  expect(result.metadata).toMatchObject({ source: 'in-memory-security-execution-authorization-engine' });
 
   expect(() => {
     (result as { decision: AuthorizationDecision }).decision = AuthorizationDecision.DENIED;

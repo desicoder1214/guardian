@@ -24,6 +24,14 @@ function freezeMetadata(metadata?: Record<string, unknown>): Record<string, unkn
   return metadata ? Object.freeze({ ...metadata }) : undefined;
 }
 
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
 function freezeIntent(intent: SecurityExecutionDispatchIntent): SecurityExecutionDispatchIntent {
   return Object.freeze({
     route: Object.freeze({
@@ -126,6 +134,8 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
       const targetedCapability = resolution.capability;
       const executionStrategy = strategyResolution.strategy ? freezeStrategy(strategyResolution.strategy) : undefined;
       const securityDecision = route.authorizationResult.authorizationRequirements[0]?.decision;
+      const authorizationMetadata = readRecord(route.authorizationResult.metadata);
+      const securityDecisionMetadata = readRecord(authorizationMetadata?.securityDecisionMetadata);
       const request = freezeRequest({
         route,
         planId: routingResult.planId,
@@ -138,6 +148,12 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
           threatAssessment: route.authorizationResult.threatAssessment,
           securityDecision,
           authorizationMetadata: route.authorizationResult.metadata,
+          runtimeId: authorizationMetadata?.runtimeId,
+          guildId: authorizationMetadata?.guildId,
+          actorId: authorizationMetadata?.actorId,
+          botId: authorizationMetadata?.botId,
+          executionPlanId: routingResult.executionPlanId,
+          securityDecisionMetadata,
         }),
       });
 

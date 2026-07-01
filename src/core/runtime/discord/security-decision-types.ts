@@ -20,6 +20,7 @@ export interface PolicyDecision {
   readonly trustedActorIds?: readonly string[];
   readonly threshold?: number;
   readonly observedCount?: number;
+  readonly metadata?: Record<string, unknown>;
 }
 
 export interface SecurityDecisionModel {

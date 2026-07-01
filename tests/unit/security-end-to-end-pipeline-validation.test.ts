@@ -727,10 +727,10 @@ test('end-to-end in-memory pipeline preserves correlation, threat assessment, an
     SecurityActionType.NOTIFY_AUDIT,
   ]);
 
-  expect(pipeline.authorizationResult.metadata).toEqual({
+  expect(pipeline.authorizationResult.metadata).toMatchObject({
     source: 'in-memory-security-execution-authorization-engine',
   });
-  expect(pipeline.routingResult.authorizationResult.metadata).toEqual({
+  expect(pipeline.routingResult.authorizationResult.metadata).toMatchObject({
     source: 'in-memory-security-execution-authorization-engine',
   });
   expect(pipeline.routingResult.routes.every((route) => route.authorizationResult.correlationId === 'corr-e2e-1')).toBe(true);

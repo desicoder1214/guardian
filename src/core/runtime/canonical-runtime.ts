@@ -75,6 +75,7 @@ import { DiscordRoleExecutor } from './discord/security-role-executor';
 import {
   InMemorySecurityDecisionEngine,
 } from './discord/security-decision-engine';
+import { SecurityDecisionModel } from './discord/security-decision-types';
 import {
   InMemoryRecoveryEngine,
   RecoveryOperationType,
@@ -363,6 +364,10 @@ export interface CanonicalGuardianRuntime {
 }
 
 export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRuntime {
+  private static readonly REPLAY_SUPPRESSION_TTL_MS = 15 * 60_000;
+  private static readonly REPLAY_SUPPRESSION_MAX_ENTRIES = 50_000;
+  private static readonly REPLAY_SUPPRESSION_PRUNE_INTERVAL = 128;
+
   private readonly logger: Logger;
   private readonly eventPipeline: DiscordEventPipeline;
   private readonly detectorRegistry = new InMemoryDetectorPluginRegistry();
@@ -374,6 +379,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private readonly executionPlanner = new InMemorySecurityExecutionPlanner();
   private readonly executionOrchestrator: InMemorySecurityExecutionOrchestrator;
   private readonly recoveryEngine = new InMemoryRecoveryEngine();
+  private readonly trustedInviterIds: readonly string[];
+  private readonly runtimeAuthorizedBotIds: readonly string[];
+  private readonly runtimeTrustedBotIds: readonly string[];
+  private readonly processedContainmentKeys = new Map<string, number>();
+  private replaySuppressionEventsSincePrune = 0;
   private unsubscribeEventHandler?: () => void;
 
   constructor(
@@ -387,6 +397,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     private readonly guildId: string,
   ) {
     this.logger = loggerFactory.createLogger();
+    this.trustedInviterIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_INVITER_IDS');
+    this.runtimeAuthorizedBotIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_BOT_IDS');
+    this.runtimeTrustedBotIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_BOT_IDS');
     this.eventPipeline = new InMemoryDiscordEventPipeline(
       eventBus,
       healthService,
@@ -502,7 +515,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           Object.freeze({
             actionType: PolicyActionType.BOT_ADD,
             enabled: true,
-            threshold: 0,
+            threshold: Number.MAX_SAFE_INTEGER,
             windowMs: 60_000,
             decisionOnViolation: SecurityDecision.BLOCK,
           }),
@@ -528,9 +541,260 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
             decisionOnViolation: SecurityDecision.BLOCK,
           }),
         ]),
-        trustedUserIds: Object.freeze([]),
+        trustedUserIds: Object.freeze([...this.trustedInviterIds]),
       }),
     );
+  }
+
+  private readIdListFromEnvironment(key: string): readonly string[] {
+    const raw = process.env[key] ?? '';
+    if (raw.trim().length === 0) {
+      return Object.freeze([]);
+    }
+
+    const values = raw
+      .split(',')
+      .map((entry) => entry.trim())
+      .filter((entry) => entry.length > 0);
+    return Object.freeze([...new Set(values)]);
+  }
+
+  private readRecord(value: unknown): Record<string, unknown> | undefined {
+    if (!value || typeof value !== 'object') {
+      return undefined;
+    }
+
+    return value as Record<string, unknown>;
+  }
+
+  private readString(record: Record<string, unknown> | undefined, ...keys: string[]): string | undefined {
+    if (!record) {
+      return undefined;
+    }
+
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === 'string' && value.trim().length > 0) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readStringArray(record: Record<string, unknown> | undefined, key: string): readonly string[] {
+    if (!record) {
+      return Object.freeze([]);
+    }
+
+    const value = record[key];
+    if (!Array.isArray(value)) {
+      return Object.freeze([]);
+    }
+
+    return Object.freeze(
+      value.filter((entry): entry is string => typeof entry === 'string' && entry.trim().length > 0),
+    );
+  }
+
+  private readBotId(payload: unknown): string | undefined {
+    const record = this.readRecord(payload);
+    const direct = this.readString(record, 'botId', 'bot_id', 'targetId', 'target_id');
+    if (direct) {
+      return direct;
+    }
+
+    const user = this.readRecord(record?.user);
+    const userId = this.readString(user, 'id', 'userId', 'user_id');
+    if (userId) {
+      return userId;
+    }
+
+    const member = this.readRecord(record?.member);
+    const memberId = this.readString(member, 'id', 'userId', 'user_id');
+    if (memberId) {
+      return memberId;
+    }
+
+    const memberUser = this.readRecord(member?.user);
+    return this.readString(memberUser, 'id', 'userId', 'user_id');
+  }
+
+  private readBoolean(record: Record<string, unknown> | undefined, ...keys: string[]): boolean | undefined {
+    if (!record) {
+      return undefined;
+    }
+
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === 'boolean') {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  private isBotAddEvent(eventName: string, payload: unknown): boolean {
+    if (eventName === 'BOT_ADD') {
+      return true;
+    }
+
+    if (eventName !== 'GUILD_MEMBER_ADD') {
+      return false;
+    }
+
+    const record = this.readRecord(payload);
+    const direct = this.readBoolean(record, 'bot', 'isBot');
+    if (typeof direct === 'boolean') {
+      return direct;
+    }
+
+    const user = this.readRecord(record?.user);
+    const userBot = this.readBoolean(user, 'bot', 'isBot');
+    if (typeof userBot === 'boolean') {
+      return userBot;
+    }
+
+    const member = this.readRecord(record?.member);
+    const memberBot = this.readBoolean(member, 'bot', 'isBot');
+    if (typeof memberBot === 'boolean') {
+      return memberBot;
+    }
+
+    const memberUser = this.readRecord(member?.user);
+    return this.readBoolean(memberUser, 'bot', 'isBot') === true;
+  }
+
+  private resolveAuthorizedBotIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedBotIds');
+    return Object.freeze([...new Set([...this.runtimeAuthorizedBotIds, ...inline])]);
+  }
+
+  private resolveTrustedBotIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'trustedBotIds');
+    return Object.freeze([...new Set([...this.runtimeTrustedBotIds, ...inline])]);
+  }
+
+  private buildReplaySuppressionKey(
+    event: DiscordGatewayNormalizedEvent,
+    actorId: string,
+    botId: string | undefined,
+  ): string {
+    if (botId) {
+      return ['bot-add', this.guildId, botId, actorId].join(':');
+    }
+
+    return ['event', this.guildId, event.eventName, event.correlationId].join(':');
+  }
+
+  private pruneReplaySuppressionKeys(nowMs: number, force = false): void {
+    if (!force) {
+      this.replaySuppressionEventsSincePrune += 1;
+      if (
+        this.replaySuppressionEventsSincePrune < IntegratedCanonicalGuardianRuntime.REPLAY_SUPPRESSION_PRUNE_INTERVAL &&
+        this.processedContainmentKeys.size < IntegratedCanonicalGuardianRuntime.REPLAY_SUPPRESSION_MAX_ENTRIES
+      ) {
+        return;
+      }
+    }
+
+    this.replaySuppressionEventsSincePrune = 0;
+
+    for (const [key, expiresAtMs] of this.processedContainmentKeys.entries()) {
+      if (expiresAtMs <= nowMs) {
+        this.processedContainmentKeys.delete(key);
+      }
+    }
+
+    while (this.processedContainmentKeys.size > IntegratedCanonicalGuardianRuntime.REPLAY_SUPPRESSION_MAX_ENTRIES) {
+      const oldestKey = this.processedContainmentKeys.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+
+      this.processedContainmentKeys.delete(oldestKey);
+    }
+  }
+
+  private hasReplaySuppressionKey(key: string, nowMs: number): boolean {
+    this.pruneReplaySuppressionKeys(nowMs);
+
+    const expiresAtMs = this.processedContainmentKeys.get(key);
+    if (!expiresAtMs) {
+      return false;
+    }
+
+    if (expiresAtMs <= nowMs) {
+      this.processedContainmentKeys.delete(key);
+      return false;
+    }
+
+    return true;
+  }
+
+  private markReplaySuppressionKeyProcessed(key: string, nowMs: number): void {
+    this.pruneReplaySuppressionKeys(nowMs);
+    this.processedContainmentKeys.set(
+      key,
+      nowMs + IntegratedCanonicalGuardianRuntime.REPLAY_SUPPRESSION_TTL_MS,
+    );
+    this.pruneReplaySuppressionKeys(nowMs, true);
+  }
+
+  private readUnauthorizedBotDetectionMetadata(
+    detectionResults: readonly DetectionResult[],
+  ): { readonly unauthorizedBotDetected: boolean; readonly isAuthorizedBot: boolean } {
+    const detectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-bot-add-detector',
+    );
+
+    const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
+      ? (detectorResult.metadata as Record<string, unknown>)
+      : undefined;
+    const isAuthorizedBot = metadata?.isAuthorizedBot === true;
+
+    return Object.freeze({
+      unauthorizedBotDetected: detectorResult?.matched === true,
+      isAuthorizedBot,
+    });
+  }
+
+  private enrichDecisionMetadata(
+    decision: SecurityDecisionModel,
+    event: DiscordGatewayNormalizedEvent,
+    actorId: string,
+    botId: string | undefined,
+    isBotAdd: boolean,
+    unauthorizedBotDetected: boolean,
+    isAuthorizedBot: boolean,
+  ) {
+    const metadata =
+      decision.metadata && typeof decision.metadata === 'object'
+        ? (decision.metadata as Record<string, unknown>)
+        : {};
+    const trustedInviter = this.trustedInviterIds.includes(actorId);
+
+    return Object.freeze({
+      ...decision,
+      metadata: Object.freeze({
+        ...metadata,
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        actorId,
+        botId,
+        botUserId: botId,
+        eventName: event.eventName,
+        isBotAdd,
+        unauthorizedBotDetected,
+        isAuthorizedBot,
+        trustedInviter,
+        rogueInviterPunishmentPlanned: isBotAdd && unauthorizedBotDetected && !trustedInviter,
+        webhookContainmentRequired: unauthorizedBotDetected,
+      }),
+    });
   }
 
   private registerProductionDetectors(): void {
@@ -676,6 +940,38 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     }
 
     const actorId = this.readActorId(event.payload);
+    const botId = this.readBotId(event.payload);
+    const botAddEvent = this.isBotAddEvent(event.eventName, event.payload);
+
+    if (actionType === PolicyActionType.BOT_ADD && botAddEvent && !botId) {
+      this.logger.warn('Canonical Guardian scenario fail-closed', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        failClosed: true,
+        reason: 'Bot add event missing bot identity',
+      });
+      return;
+    }
+
+    const nowMs = Date.now();
+    const replaySuppressionKey = this.buildReplaySuppressionKey(event, actorId, botId);
+    if (this.hasReplaySuppressionKey(replaySuppressionKey, nowMs)) {
+      this.logger.warn('Canonical Guardian replay suppressed', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        replaySuppressionKey,
+      });
+      return;
+    }
+
+    const authorizedBotIds = this.resolveAuthorizedBotIds(event.payload);
+    const trustedBotIds = this.resolveTrustedBotIds(event.payload);
     const detectionResults = await this.detectionEngine.evaluate(
       Object.freeze({
         normalizedEvent: event,
@@ -687,6 +983,17 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         metadata: Object.freeze({
           scenario: scenarioContract?.scenario,
           eventName: event.eventName,
+          runtimeId: this.runtimeId,
+          guildId: this.guildId,
+          actorId,
+          botId,
+          botUserId: botId,
+          authorizedBotIds,
+          trustedBotIds,
+          botAuthorization: Object.freeze({
+            authorizedBotIds,
+            trustedBotIds,
+          }),
         }),
       }),
     );
@@ -698,14 +1005,29 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       scenario: scenarioContract?.scenario,
       eventName: event.eventName,
       actionType,
+      actorId,
+      botId,
       detectorCount: detectionResults.length,
       matchedDetectorCount: detectionResults.filter((result) => result.matched).length,
     });
 
     this.securityEvaluationPipeline.stageDetectionResults(detectionResults);
     const decision = await this.securityEvaluationPipeline.evaluate(event, actorId, actionType);
-    const actionPlan = this.actionPlanner.plan(decision);
-    const executionPlan = this.executionPlanner.plan(actionPlan, decision);
+    const botDetectionMetadata = this.readUnauthorizedBotDetectionMetadata(detectionResults);
+    const enrichedDecision = this.enrichDecisionMetadata(
+      decision,
+      event,
+      actorId,
+      botId,
+      botAddEvent,
+      botDetectionMetadata.unauthorizedBotDetected,
+      botDetectionMetadata.isAuthorizedBot,
+    );
+
+    const actionPlan = this.actionPlanner.plan(enrichedDecision);
+    const executionPlan = this.executionPlanner.plan(actionPlan, enrichedDecision);
+
+    this.markReplaySuppressionKeyProcessed(replaySuppressionKey, nowMs);
 
     const containment = await this.executionOrchestrator.executeCoordinatedContainment(
       Object.freeze({

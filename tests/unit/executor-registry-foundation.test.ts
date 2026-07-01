@@ -158,7 +158,7 @@ test('route preserves correlationId, threat assessment, and authorization metada
   expect(result.correlationId).toBe('corr-registry-1');
   expect(result.threatAssessmentPreserved).toBe(true);
   expect(result.securityDecisionPreserved).toBe(true);
-  expect(result.authorizationMetadata).toEqual({ source: 'in-memory-security-execution-authorization-engine' });
+  expect(result.authorizationMetadata).toMatchObject({ source: 'in-memory-security-execution-authorization-engine' });
   expect(result.actionResolutions.every((resolution) => resolution.correlationId === 'corr-registry-1')).toBe(true);
 });
 

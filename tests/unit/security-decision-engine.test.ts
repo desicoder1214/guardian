@@ -125,6 +125,25 @@ test('trusted placeholder returns ALLOW', async () => {
   expect(result.reason).toBe(SecurityDecisionReason.TRUSTED_ACTOR);
 });
 
+test('trusted actor does not bypass forced fast-path blocking', async () => {
+  const engine = new InMemorySecurityDecisionEngine();
+  const result = await engine.evaluate(
+    buildContext('guild-1', 'trusted-user'),
+    buildAttribution({ actorId: 'trusted-user', confidence: AuditAttributionConfidence.HIGH }),
+    {
+      ...buildPolicyDecision({
+        trustedActorIds: ['trusted-user'],
+        thresholdExceeded: true,
+        decision: SecurityDecision.BLOCK,
+      }),
+      metadata: Object.freeze({ fastPathEnforcement: true }),
+    },
+  );
+
+  expect(result.decision).toBe(SecurityDecision.BLOCK);
+  expect(result.reason).toBe(SecurityDecisionReason.POLICY_BLOCK);
+});
+
 test('policy allow returns ALLOW', async () => {
   const engine = new InMemorySecurityDecisionEngine();
   const result = await engine.evaluate(
