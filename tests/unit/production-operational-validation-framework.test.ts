@@ -38,10 +38,24 @@ describe('InMemoryProductionOperationalValidationFramework', () => {
     expect(report.success).toBe(true);
     expect(report.overallOperationalReadiness).toBe(true);
     expect(report.scenarioResults).toHaveLength(10);
+    expect(report.failureAnalysis).toEqual([]);
+    expect(report.unsupportedRoutesFailClosed).toBe(true);
+    expect(report.duplicateExecutionPrevented).toBe(true);
+    expect(report.replaySafe).toBe(true);
     expect(
       new Set(report.scenarioResults.map((result) => result.scenario)),
     ).toEqual(new Set(DEFAULT_OPERATIONAL_VALIDATION_SCENARIOS.map((scenario) => scenario.scenario)));
     expect(report.scenarioResults.every((result) => result.overallOperationalReadiness)).toBe(true);
+    expect(
+      report.scenarioResults.every(
+        (result) =>
+          result.detectionResult.detected &&
+          result.executionPlan.created &&
+          result.authorizationResult.enforced &&
+          result.metadataVerification.preserved &&
+          result.replayVerification.duplicatePrevented,
+      ),
+    ).toBe(true);
   });
 
   test('preserves correlation/runtime/transaction/execution/route metadata per scenario', async () => {
@@ -187,5 +201,31 @@ describe('InMemoryProductionOperationalValidationFramework', () => {
     expect(first.scenarioResults.map((scenario) => scenario.routeSelected.routeId)).toEqual(
       second.scenarioResults.map((scenario) => scenario.routeSelected.routeId),
     );
+  });
+
+  test('records a deterministic performance baseline for the operational chain', async () => {
+    const framework = new InMemoryProductionOperationalValidationFramework({
+      clock: new FixedClock([1700000001000, 1700000001037]),
+    });
+
+    const report = await framework.validate(createRequest({ validationId: 'baseline-operational-1' }));
+
+    const baseline = {
+      validationDurationMs: report.durationMs,
+      scenarioCount: report.scenarioResults.length,
+      detectedScenarios: report.scenarioResults.filter((scenario) => scenario.detectionResult.detected).length,
+      planningReadyScenarios: report.scenarioResults.filter((scenario) => scenario.executionPlan.created).length,
+      dispatchReadyScenarios: report.scenarioResults.filter((scenario) => scenario.routeSelected.decision === 'EXECUTABLE').length,
+    };
+
+    console.info('operational-certification-performance-baseline', baseline);
+
+    expect(baseline).toMatchObject({
+      scenarioCount: 10,
+      detectedScenarios: 10,
+      planningReadyScenarios: 10,
+    });
+    expect(baseline.validationDurationMs).toBeGreaterThanOrEqual(0);
+    expect(baseline.dispatchReadyScenarios).toBeGreaterThan(0);
   });
 });
