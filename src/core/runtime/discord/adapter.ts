@@ -13,7 +13,7 @@ export interface DiscordRuntimeAdapterOptions {
   readonly logger: Logger;
 }
 
-export class InMemoryDiscordRuntimeAdapter implements DiscordRuntimeAdapter {
+export class DiscordRuntimeLifecycleAdapter implements DiscordRuntimeAdapter {
   private state: DiscordRuntimeState = 'disconnected';
 
   constructor(private readonly options: DiscordRuntimeAdapterOptions) {}

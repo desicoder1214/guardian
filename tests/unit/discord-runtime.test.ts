@@ -1,5 +1,5 @@
 import { MockDiscordClientAdapter } from '../../src/core/runtime/discord/client';
-import { InMemoryDiscordRuntimeAdapter } from '../../src/core/runtime/discord/adapter';
+import { DiscordRuntimeLifecycleAdapter } from '../../src/core/runtime/discord/adapter';
 import { DiscordRuntimeConfiguration } from '../../src/core/runtime/discord/config';
 import { InMemoryEventBus } from '../../src/core/event/bus';
 import { RuntimeHealthService } from '../../src/core/runtime/health';
@@ -17,7 +17,7 @@ test('Discord runtime adapter starts, stops, and reconnects', async () => {
   const eventBus = new InMemoryEventBus();
   const healthService = new RuntimeHealthService();
   const client = new MockDiscordClientAdapter();
-  const adapter = new InMemoryDiscordRuntimeAdapter({
+  const adapter = new DiscordRuntimeLifecycleAdapter({
     client,
     config,
     eventBus,
@@ -53,7 +53,7 @@ test('Discord runtime adapter publishes error event on failure', async () => {
     isConnected: () => false,
   };
 
-  const adapter = new InMemoryDiscordRuntimeAdapter({
+  const adapter = new DiscordRuntimeLifecycleAdapter({
     client: failingClient,
     config,
     eventBus,

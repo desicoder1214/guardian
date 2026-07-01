@@ -5,6 +5,8 @@ import { LoggerFactory } from './logger';
 import { RuntimeHealthService } from './health';
 import { RuntimeManager } from './lifecycle';
 import { InMemoryEventBus } from '../event/bus';
+import { SecurityStartupRuntimeCoordinator } from './security/security-startup-runtime-coordinator';
+import { RuntimeStartupCoordinationRequestFactory } from './lifecycle';
 
 export interface RuntimeConfiguration {
   readonly appName: string;
@@ -33,6 +35,14 @@ export const RuntimeManagerId: ServiceIdentifier<RuntimeManager> = {
   name: 'RuntimeManager',
 };
 
+export const StartupRuntimeCoordinatorId: ServiceIdentifier<SecurityStartupRuntimeCoordinator> = {
+  name: 'StartupRuntimeCoordinator',
+};
+
+export const RuntimeStartupCoordinationRequestFactoryId: ServiceIdentifier<RuntimeStartupCoordinationRequestFactory> = {
+  name: 'RuntimeStartupCoordinationRequestFactory',
+};
+
 export const EventBusId: ServiceIdentifier<InMemoryEventBus> = {
   name: 'EventBus',
 };
@@ -44,8 +54,24 @@ export class RuntimeServiceFactory implements ServiceFactory<RuntimeManager> {
     const logger = this.container.resolve(LoggerId);
     const healthService = this.container.resolve(HealthServiceId);
     const eventBus = this.container.resolve(EventBusId);
+    const startupRuntimeCoordinator = this.tryResolve(StartupRuntimeCoordinatorId);
+    const startupRequestFactory = this.tryResolve(RuntimeStartupCoordinationRequestFactoryId);
 
-    return new RuntimeManager(logger, healthService, eventBus);
+    return new RuntimeManager(
+      logger,
+      healthService,
+      eventBus,
+      startupRuntimeCoordinator,
+      startupRequestFactory,
+    );
+  }
+
+  private tryResolve<T>(id: ServiceIdentifier<T>): T | undefined {
+    try {
+      return this.container.resolve(id);
+    } catch {
+      return undefined;
+    }
   }
 }
 
