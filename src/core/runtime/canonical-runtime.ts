@@ -20,6 +20,7 @@ import {
   InMemoryDetectorPluginRegistry,
 } from './discord/detection-plugin-framework';
 import { UnauthorizedBotAddDetector } from './discord/unauthorized-bot-add-detector';
+import { UnauthorizedWebhookCreateDetector } from './discord/unauthorized-webhook-create-detector';
 import { DangerousRoleGrantDetector } from './discord/dangerous-role-grant-detector';
 import {
   InMemorySecurityContextBuilder,
@@ -204,7 +205,7 @@ function resolveEnterpriseScenarioContract(
       case EnterpriseOperationalScenario.DANGEROUS_WEBHOOK_CREATION:
         return Object.freeze({
           scenario: override,
-          actionType: PolicyActionType.WEBHOOK_DELETE,
+          actionType: PolicyActionType.WEBHOOK_CREATE,
           supportedByCanonicalDetectorPath: true,
         });
       case EnterpriseOperationalScenario.WEBHOOK_MODIFICATION:
@@ -274,7 +275,7 @@ function resolveEnterpriseScenarioContract(
     case 'WEBHOOK_CREATE':
       return Object.freeze({
         scenario: EnterpriseOperationalScenario.DANGEROUS_WEBHOOK_CREATION,
-        actionType: PolicyActionType.WEBHOOK_DELETE,
+        actionType: PolicyActionType.WEBHOOK_CREATE,
         supportedByCanonicalDetectorPath: true,
       });
     case 'WEBHOOK_UPDATE':
@@ -391,6 +392,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private readonly trustedInviterIds: readonly string[];
   private readonly runtimeAuthorizedBotIds: readonly string[];
   private readonly runtimeTrustedBotIds: readonly string[];
+  private readonly runtimeAuthorizedWebhookIds: readonly string[];
+  private readonly runtimeAuthorizedIntegrationIds: readonly string[];
   private readonly processedContainmentKeys = new Map<string, number>();
   private replaySuppressionEventsSincePrune = 0;
   private unsubscribeEventHandler?: () => void;
@@ -409,6 +412,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.trustedInviterIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_INVITER_IDS');
     this.runtimeAuthorizedBotIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_BOT_IDS');
     this.runtimeTrustedBotIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_BOT_IDS');
+    this.runtimeAuthorizedWebhookIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_WEBHOOK_IDS');
+    this.runtimeAuthorizedIntegrationIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_INTEGRATION_IDS');
     this.eventPipeline = new InMemoryDiscordEventPipeline(
       eventBus,
       healthService,
@@ -537,9 +542,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
             decisionOnViolation: SecurityDecision.BLOCK,
           }),
           Object.freeze({
-            actionType: PolicyActionType.WEBHOOK_DELETE,
+            actionType: PolicyActionType.WEBHOOK_CREATE,
             enabled: true,
-            threshold: 0,
+            threshold: Number.MAX_SAFE_INTEGER,
             windowMs: 60_000,
             decisionOnViolation: SecurityDecision.BLOCK,
           }),
@@ -705,6 +710,27 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return this.readString(afterRole, 'id', 'roleId', 'role_id');
   }
 
+  private readWebhookId(payload: unknown): string | undefined {
+    const record = this.readRecord(payload);
+    const direct = this.readString(
+      record,
+      'webhookId',
+      'webhook_id',
+      'targetWebhookId',
+      'target_webhook_id',
+      'targetId',
+      'target_id',
+      'resourceId',
+      'resource_id',
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const webhook = this.readRecord(record?.webhook);
+    return this.readString(webhook, 'id', 'webhookId', 'webhook_id');
+  }
+
   private readRoleContainmentPolicy(payload: unknown): {
     readonly punishActor: boolean;
     readonly neutralizeTarget: boolean;
@@ -730,6 +756,22 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       punishActor,
       neutralizeTarget,
       protectedRole,
+    });
+  }
+
+  private readWebhookContainmentPolicy(payload: unknown): {
+    readonly punishActor: boolean;
+  } {
+    const record = this.readRecord(payload);
+    const policy = this.readRecord(record?.policy);
+
+    const punishActor =
+      this.readBoolean(policy, 'punishActor', 'punish_actor') ??
+      this.readBoolean(record, 'policyPunishActor', 'policy_punish_actor') ??
+      true;
+
+    return Object.freeze({
+      punishActor,
     });
   }
 
@@ -969,6 +1011,18 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return Object.freeze([...new Set([...this.runtimeTrustedBotIds, ...inline])]);
   }
 
+  private resolveAuthorizedWebhookIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedWebhookIds');
+    return Object.freeze([...new Set([...this.runtimeAuthorizedWebhookIds, ...inline])]);
+  }
+
+  private resolveAuthorizedIntegrationIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedIntegrationIds');
+    return Object.freeze([...new Set([...this.runtimeAuthorizedIntegrationIds, ...inline])]);
+  }
+
   private buildReplaySuppressionKey(
     event: DiscordGatewayNormalizedEvent,
     actionType: PolicyActionType,
@@ -976,6 +1030,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     botId: string | undefined,
     memberUserId: string | undefined,
     roleId: string | undefined,
+    webhookId: string | undefined,
   ): string {
     if (botId) {
       return ['bot-add', this.guildId, botId, actorId].join(':');
@@ -983,6 +1038,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     if (actionType === PolicyActionType.ROLE_CREATE && memberUserId && roleId) {
       return ['role-grant', this.guildId, memberUserId, roleId, actorId].join(':');
+    }
+
+    if (actionType === PolicyActionType.WEBHOOK_CREATE && webhookId) {
+      return ['webhook-create', this.guildId, webhookId, actorId].join(':');
     }
 
     return ['event', this.guildId, event.eventName, event.correlationId].join(':');
@@ -1060,11 +1119,34 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     });
   }
 
+  private readUnauthorizedWebhookDetectionMetadata(
+    detectionResults: readonly DetectionResult[],
+  ): {
+    readonly unauthorizedWebhookDetected: boolean;
+    readonly isAuthorizedWebhook: boolean;
+    readonly isAuthorizedIntegration: boolean;
+  } {
+    const detectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-webhook-create-detector',
+    );
+
+    const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
+      ? (detectorResult.metadata as Record<string, unknown>)
+      : undefined;
+
+    return Object.freeze({
+      unauthorizedWebhookDetected: detectorResult?.matched === true,
+      isAuthorizedWebhook: metadata?.isAuthorizedWebhook === true,
+      isAuthorizedIntegration: metadata?.isAuthorizedIntegration === true,
+    });
+  }
+
   private enrichDecisionMetadata(
     decision: SecurityDecisionModel,
     event: DiscordGatewayNormalizedEvent,
     actorId: string,
     botId: string | undefined,
+    webhookId: string | undefined,
     memberUserId: string | undefined,
     roleId: string | undefined,
     roleContainmentPolicy: {
@@ -1072,9 +1154,15 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       readonly neutralizeTarget: boolean;
       readonly protectedRole: boolean;
     },
+    webhookContainmentPolicy: {
+      readonly punishActor: boolean;
+    },
     isBotAdd: boolean,
     unauthorizedBotDetected: boolean,
     isAuthorizedBot: boolean,
+    unauthorizedWebhookDetected: boolean,
+    isAuthorizedWebhook: boolean,
+    isAuthorizedIntegration: boolean,
   ) {
     const metadata =
       decision.metadata && typeof decision.metadata === 'object'
@@ -1091,15 +1179,21 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         actorId,
         botId,
         botUserId: botId,
+        webhookId,
         memberUserId,
         roleId,
         eventName: event.eventName,
         isBotAdd,
         unauthorizedBotDetected,
         isAuthorizedBot,
+        unauthorizedWebhookDetected,
+        isAuthorizedWebhook,
+        isAuthorizedIntegration,
         trustedInviter,
         rogueInviterPunishmentPlanned: isBotAdd && unauthorizedBotDetected && !trustedInviter,
-        webhookContainmentRequired: unauthorizedBotDetected,
+        webhookContainmentRequired: unauthorizedWebhookDetected,
+        webhookPolicyViolation: unauthorizedWebhookDetected,
+        policyWebhookPunishActor: webhookContainmentPolicy.punishActor,
         policyPunishActor: roleContainmentPolicy.punishActor,
         policyNeutralizeTarget: roleContainmentPolicy.neutralizeTarget,
         protectedRole: roleContainmentPolicy.protectedRole,
@@ -1107,6 +1201,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           punishActor: roleContainmentPolicy.punishActor,
           neutralizeTarget: roleContainmentPolicy.neutralizeTarget,
           protectedRole: roleContainmentPolicy.protectedRole,
+          webhookPunishActor: webhookContainmentPolicy.punishActor,
         }),
       }),
     });
@@ -1114,6 +1209,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
   private registerProductionDetectors(): void {
     this.detectorRegistry.register(new UnauthorizedBotAddDetector());
+    this.detectorRegistry.register(new UnauthorizedWebhookCreateDetector());
     this.detectorRegistry.register(new DangerousRoleGrantDetectorPluginAdapter());
     this.detectorRegistry.register(
       new ScenarioContractDetectorPlugin(
@@ -1125,18 +1221,6 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         'Duplicate bot identity detected',
         DetectionSeverity.HIGH,
         EnterpriseOperationalScenario.DUPLICATE_BOT_IDENTITY,
-      ),
-    );
-    this.detectorRegistry.register(
-      new ScenarioContractDetectorPlugin(
-        'dangerous-webhook-creation-detector',
-        '1.0.0',
-        80,
-        Object.freeze([PolicyActionType.WEBHOOK_DELETE]),
-        Object.freeze(['WEBHOOK_CREATE']),
-        'Dangerous webhook creation detected',
-        DetectionSeverity.CRITICAL,
-        EnterpriseOperationalScenario.DANGEROUS_WEBHOOK_CREATION,
       ),
     );
     this.detectorRegistry.register(
@@ -1210,6 +1294,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       case 'MEMBER_ROLE_ADD':
         return PolicyActionType.ROLE_CREATE;
       case 'WEBHOOK_CREATE':
+        return PolicyActionType.WEBHOOK_CREATE;
       case 'WEBHOOK_DELETE':
         return PolicyActionType.WEBHOOK_DELETE;
       case 'CHANNEL_DELETE':
@@ -1256,9 +1341,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     const actorId = this.readActorId(event.payload);
     const botId = this.readBotId(event.payload);
+    const webhookId = this.readWebhookId(event.payload);
     const memberUserId = this.readMemberUserId(event.payload);
     const roleId = this.readRoleId(event.payload);
     const roleContainmentPolicy = this.readRoleContainmentPolicy(event.payload);
+    const webhookContainmentPolicy = this.readWebhookContainmentPolicy(event.payload);
     const botAddEvent = this.isBotAddEvent(event.eventName, event.payload);
 
     if (event.eventName === 'GUILD_MEMBER_ADD' && !botAddEvent) {
@@ -1286,6 +1373,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       botId,
       memberUserId,
       roleId,
+      webhookId,
     );
     if (this.hasReplaySuppressionKey(replaySuppressionKey, nowMs)) {
       this.logger.warn('Canonical Guardian replay suppressed', {
@@ -1301,6 +1389,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     const authorizedBotIds = this.resolveAuthorizedBotIds(event.payload);
     const trustedBotIds = this.resolveTrustedBotIds(event.payload);
+    const authorizedWebhookIds = this.resolveAuthorizedWebhookIds(event.payload);
+    const authorizedIntegrationIds = this.resolveAuthorizedIntegrationIds(event.payload);
     const detectionResults = await this.detectionEngine.evaluate(
       Object.freeze({
         normalizedEvent: event,
@@ -1322,6 +1412,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           botAuthorization: Object.freeze({
             authorizedBotIds,
             trustedBotIds,
+          }),
+          authorizedWebhookIds,
+          authorizedIntegrationIds,
+          webhookAuthorization: Object.freeze({
+            authorizedWebhookIds,
+            authorizedIntegrationIds,
           }),
         }),
       }),
@@ -1367,9 +1463,28 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       return;
     }
 
+    if (
+      actionType === PolicyActionType.WEBHOOK_CREATE &&
+      !effectiveDetectionResults.some(
+        (result) => result.detectorId === 'unauthorized-webhook-create-detector' && result.matched,
+      )
+    ) {
+      this.logger.info('Canonical Guardian webhook containment not required', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        actorId,
+        webhookId,
+      });
+      return;
+    }
+
     this.securityEvaluationPipeline.stageDetectionResults(effectiveDetectionResults);
     const decision = await this.securityEvaluationPipeline.evaluate(event, actorId, actionType);
     const botDetectionMetadata = this.readUnauthorizedBotDetectionMetadata(effectiveDetectionResults);
+    const webhookDetectionMetadata = this.readUnauthorizedWebhookDetectionMetadata(effectiveDetectionResults);
     const effectiveRoleContainmentPolicy = this.mergeRoleContainmentPolicyFromDetections(
       roleContainmentPolicy,
       effectiveDetectionResults,
@@ -1379,12 +1494,17 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       event,
       actorId,
       botId,
+      webhookId,
       memberUserId,
       roleId,
       effectiveRoleContainmentPolicy,
+      webhookContainmentPolicy,
       botAddEvent,
       botDetectionMetadata.unauthorizedBotDetected,
       botDetectionMetadata.isAuthorizedBot,
+      webhookDetectionMetadata.unauthorizedWebhookDetected,
+      webhookDetectionMetadata.isAuthorizedWebhook,
+      webhookDetectionMetadata.isAuthorizedIntegration,
     );
 
     const actionPlan = this.actionPlanner.plan(enrichedDecision);

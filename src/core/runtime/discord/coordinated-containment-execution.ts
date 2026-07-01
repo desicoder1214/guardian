@@ -118,7 +118,29 @@ function readString(record: Record<string, unknown> | undefined, ...keys: string
 }
 
 function resolveExecutionRequestIdempotencyKey(request: SecurityDomainExecutionRequest): string {
-  return `${request.planId}:${request.executionPlanId}:${request.route.routeId}:${request.correlationId}`;
+  const base = `${request.planId}:${request.executionPlanId}:${request.route.routeId}:${request.correlationId}`;
+  const metadata = resolveContainmentMetadata(request);
+  const targetResourceId = readString(
+    metadata,
+    'webhookId',
+    'webhook_id',
+    'botUserId',
+    'bot_user_id',
+    'memberUserId',
+    'member_user_id',
+    'roleId',
+    'role_id',
+    'channelId',
+    'channel_id',
+    'overwriteId',
+    'overwrite_id',
+    'resourceId',
+    'resource_id',
+    'targetId',
+    'target_id',
+  );
+
+  return targetResourceId ? `${base}:${targetResourceId}` : base;
 }
 
 function freezeActionResult(result: CoordinatedContainmentActionResult): CoordinatedContainmentActionResult {
@@ -385,7 +407,9 @@ function toMemberRequest(request: SecurityDomainExecutionRequest): DiscordMember
     memberUserId,
     idempotencyKey: resolveExecutionRequestIdempotencyKey(request),
     reason: intentSupportsActorPunishment(request.capability)
-      ? 'guardian:punish-role-escalation-actor'
+      ? request.capability === SecurityExecutorCapability.QUARANTINE_ACTOR
+        ? 'guardian:quarantine-actor'
+        : 'guardian:punish-role-escalation-actor'
       : 'guardian:neutralize-escalated-member',
     metadata: Object.freeze({
       planId: request.planId,
@@ -399,7 +423,10 @@ function toMemberRequest(request: SecurityDomainExecutionRequest): DiscordMember
 }
 
 function intentSupportsActorPunishment(capability: SecurityExecutorCapability): boolean {
-  return capability === SecurityExecutorCapability.PUNISH_ROLE_ESCALATION_ACTOR;
+  return (
+    capability === SecurityExecutorCapability.PUNISH_ROLE_ESCALATION_ACTOR ||
+    capability === SecurityExecutorCapability.QUARANTINE_ACTOR
+  );
 }
 
 export class InMemoryCoordinatedContainmentExecution {

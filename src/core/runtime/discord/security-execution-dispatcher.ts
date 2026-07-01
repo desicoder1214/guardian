@@ -167,6 +167,13 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
         'dangerousRoleId',
         'dangerous_role_id',
       );
+      const webhookId = readString(
+        securityDecisionMetadata,
+        'webhookId',
+        'webhook_id',
+        'targetWebhookId',
+        'target_webhook_id',
+      );
       const request = freezeRequest({
         route,
         planId: routingResult.planId,
@@ -185,6 +192,7 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
           botId: authorizationMetadata?.botId,
           ...(memberUserId ? { memberUserId } : {}),
           ...(roleId ? { roleId } : {}),
+          ...(webhookId ? { webhookId } : {}),
           executionPlanId: routingResult.executionPlanId,
           securityDecisionMetadata,
         }),

@@ -167,6 +167,34 @@ test('BLOCK on ROLE_CREATE plans dangerous role containment and policy-driven ac
   ]);
 });
 
+test('BLOCK on WEBHOOK_CREATE plans mandatory containment and policy-driven punishment', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.WEBHOOK_CREATE,
+    metadata: {
+      source: 'test',
+      actorId: 'actor-1',
+      webhookContainmentRequired: true,
+      policy: {
+        punishActor: true,
+      },
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([
+    SecurityActionType.FREEZE_WEBHOOKS,
+    SecurityActionType.QUARANTINE_ACTOR,
+    SecurityActionType.CREATE_INCIDENT,
+    SecurityActionType.NOTIFY_AUDIT,
+  ]);
+});
+
 test('protected role skips punishment and neutralization actions', () => {
   const planner = new InMemorySecurityActionPlanner();
   const plan = planner.plan({

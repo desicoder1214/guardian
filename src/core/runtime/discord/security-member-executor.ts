@@ -208,7 +208,9 @@ export class DiscordMemberExecutor implements SecurityMemberExecutor {
       reason:
         request.capability === SecurityExecutorCapability.PUNISH_ROLE_ESCALATION_ACTOR
           ? 'guardian:punish-role-escalation-actor'
-          : 'guardian:neutralize-escalated-member',
+          : request.capability === SecurityExecutorCapability.QUARANTINE_ACTOR
+            ? 'guardian:quarantine-actor'
+            : 'guardian:neutralize-escalated-member',
       metadata: Object.freeze({
         planId: request.planId,
         executionPlanId: request.executionPlanId,
