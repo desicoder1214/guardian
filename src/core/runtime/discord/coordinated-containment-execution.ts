@@ -13,11 +13,13 @@ import {
   DiscordExecutionResult,
   DiscordExecutionService,
   DiscordExecutionStatus,
+  DiscordMemberContainmentExecutionRequest,
   DiscordPermissionOverwriteExecutionRequest,
   DiscordRoleRemovalExecutionRequest,
   DiscordWebhookRemovalExecutionRequest,
 } from './discord-execution-service';
 import { SecurityBotExecutionResult, SecurityBotExecutionStatus } from './security-bot-executor';
+import { SecurityMemberExecutionResult, SecurityMemberExecutionStatus } from './security-member-executor';
 import { SecurityRoleExecutionResult, SecurityRoleExecutionStatus } from './security-role-executor';
 
 export enum CoordinatedContainmentActionStatus {
@@ -61,6 +63,11 @@ export interface CoordinatedContainmentExecutionDependencies {
     execute(request: SecurityDomainExecutionRequest):
       | SecurityBotExecutionResult
       | Promise<SecurityBotExecutionResult>;
+  };
+  readonly memberExecutor?: {
+    execute(request: SecurityDomainExecutionRequest):
+      | SecurityMemberExecutionResult
+      | Promise<SecurityMemberExecutionResult>;
   };
   readonly roleExecutor?: {
     execute(request: SecurityDomainExecutionRequest):
@@ -177,6 +184,18 @@ function classifyRoleResult(result: SecurityRoleExecutionResult): CoordinatedCon
   }
 
   if (result.status === SecurityRoleExecutionStatus.SKIPPED_DUPLICATE) {
+    return CoordinatedContainmentActionStatus.SKIPPED_DUPLICATE;
+  }
+
+  return CoordinatedContainmentActionStatus.FAILED;
+}
+
+function classifyMemberResult(result: SecurityMemberExecutionResult): CoordinatedContainmentActionStatus {
+  if (result.status === SecurityMemberExecutionStatus.EXECUTED) {
+    return CoordinatedContainmentActionStatus.SUCCEEDED;
+  }
+
+  if (result.status === SecurityMemberExecutionStatus.SKIPPED_DUPLICATE) {
     return CoordinatedContainmentActionStatus.SKIPPED_DUPLICATE;
   }
 
@@ -348,6 +367,41 @@ function toPermissionOverwriteRequest(request: SecurityDomainExecutionRequest): 
   });
 }
 
+function toMemberRequest(request: SecurityDomainExecutionRequest): DiscordMemberContainmentExecutionRequest {
+  const metadata = resolveContainmentMetadata(request);
+
+  const memberUserIdFromTarget =
+    intentSupportsActorPunishment(request.capability)
+      ? readString(metadata, 'actorId', 'actor_id')
+      : undefined;
+
+  const memberUserId =
+    memberUserIdFromTarget ??
+    readString(metadata, 'memberUserId', 'member_user_id', 'memberId', 'member_id', 'targetUserId', 'target_user_id');
+
+  return Object.freeze({
+    correlationId: request.correlationId,
+    guildId: readString(metadata, 'guildId', 'guild_id'),
+    memberUserId,
+    idempotencyKey: resolveExecutionRequestIdempotencyKey(request),
+    reason: intentSupportsActorPunishment(request.capability)
+      ? 'guardian:punish-role-escalation-actor'
+      : 'guardian:neutralize-escalated-member',
+    metadata: Object.freeze({
+      planId: request.planId,
+      executionPlanId: request.executionPlanId,
+      routeId: request.route.routeId,
+      threatAssessment: metadata.threatAssessment,
+      securityDecision: metadata.securityDecision,
+      authorizationMetadata: metadata.authorizationMetadata,
+    }),
+  });
+}
+
+function intentSupportsActorPunishment(capability: SecurityExecutorCapability): boolean {
+  return capability === SecurityExecutorCapability.PUNISH_ROLE_ESCALATION_ACTOR;
+}
+
 export class InMemoryCoordinatedContainmentExecution {
   async execute(
     orchestration: CoordinatedContainmentOrchestrationSnapshot,
@@ -430,6 +484,42 @@ export class InMemoryCoordinatedContainmentExecution {
               status: classifyDiscordResult(fallbackRoleResult),
               executionTimeMs: Math.max(0, Date.now() - actionStartedAt),
               metadata: freezeMetadata(fallbackRoleResult.metadata as Record<string, unknown> | undefined),
+            }),
+          );
+          break;
+        }
+        case SecurityExecutorCapability.NEUTRALIZE_ESCALATED_MEMBER:
+        case SecurityExecutorCapability.QUARANTINE_ACTOR:
+        case SecurityExecutorCapability.PUNISH_ROLE_ESCALATION_ACTOR: {
+          if (dependencies.memberExecutor) {
+            const memberResult = await dependencies.memberExecutor.execute(request);
+            actionResults.push(
+              freezeActionResult({
+                actionType: intent.route.actionType,
+                sequence: intent.route.sequence,
+                capability: intent.targetedCapability,
+                correlationId: request.correlationId,
+                status: classifyMemberResult(memberResult),
+                executionTimeMs: Math.max(0, Date.now() - actionStartedAt),
+                metadata: freezeMetadata(memberResult.metadata),
+              }),
+            );
+            break;
+          }
+
+          const memberRequest = toMemberRequest(request);
+          const fallbackMemberResult = intent.targetedCapability === SecurityExecutorCapability.PUNISH_ROLE_ESCALATION_ACTOR
+            ? await dependencies.discordExecutionService.member.banMember(memberRequest)
+            : await dependencies.discordExecutionService.member.kickMember(memberRequest);
+          actionResults.push(
+            freezeActionResult({
+              actionType: intent.route.actionType,
+              sequence: intent.route.sequence,
+              capability: intent.targetedCapability,
+              correlationId: request.correlationId,
+              status: classifyDiscordResult(fallbackMemberResult),
+              executionTimeMs: Math.max(0, Date.now() - actionStartedAt),
+              metadata: freezeMetadata(fallbackMemberResult.metadata as Record<string, unknown> | undefined),
             }),
           );
           break;

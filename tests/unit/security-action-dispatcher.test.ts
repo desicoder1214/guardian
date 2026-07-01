@@ -45,15 +45,18 @@ function result(correlationId: string, operation: string): DiscordExecutionResul
 
 function buildService(spy: { calls: string[] }): DiscordExecutionService {
   const member: MemberExecutionService = {
-    banMember: async (correlationId) => {
+    banMember: async (request) => {
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
       spy.calls.push('member.banMember');
       return result(correlationId, 'member.banMember');
     },
-    kickMember: async (correlationId) => {
+    kickMember: async (request) => {
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
       spy.calls.push('member.kickMember');
       return result(correlationId, 'member.kickMember');
     },
-    removeRoles: async (correlationId) => {
+    removeRoles: async (request) => {
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
       spy.calls.push('member.removeRoles');
       return result(correlationId, 'member.removeRoles');
     },

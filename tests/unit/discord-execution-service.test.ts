@@ -5,6 +5,7 @@ import {
   DiscordExecutionErrorCode,
   DiscordExecutionStatus,
   DiscordBotRemovalOperation,
+  DiscordMemberModerationOperation,
   InMemoryDiscordExecutionService,
   ProductionDiscordExecutionService,
 } from '../../src/core/runtime/discord/discord-execution-service';
@@ -498,6 +499,57 @@ test('production foundation validates required bot execution request fields', as
 
   const service = new ProductionDiscordExecutionService(operation);
   const result = await service.bot.removeUnauthorizedBot({ correlationId: 'corr-missing-fields' });
+
+  expect(result.status).toBe(DiscordExecutionStatus.FAILED);
+  const metadata = result.metadata as { error: { code: DiscordExecutionErrorCode; retryable: boolean } };
+  expect(metadata.error.code).toBe(DiscordExecutionErrorCode.VALIDATION_ERROR);
+  expect(metadata.error.retryable).toBe(false);
+});
+
+test('production service executes member kick when member moderation operation is provided', async () => {
+  const memberKickCalls: Array<{ correlationId: string; guildId: string; memberUserId: string; reason?: string }> = [];
+  const memberOperation: DiscordMemberModerationOperation = {
+    async banMember() {
+      return Object.freeze({ ok: true, statusCode: 204 });
+    },
+    async kickMember(request) {
+      memberKickCalls.push(request);
+      return Object.freeze({ ok: true, statusCode: 204 });
+    },
+  };
+
+  const service = new ProductionDiscordExecutionService({ memberModerationOperation: memberOperation }, { maxAttempts: 2 });
+  const result = await service.member.kickMember({
+    correlationId: 'corr-member-kick-1',
+    guildId: 'guild-member-1',
+    memberUserId: 'member-1',
+    idempotencyKey: 'idem-member-kick-1',
+    reason: 'guardian:neutralize-escalated-member',
+  });
+
+  expect(memberKickCalls).toEqual([
+    {
+      correlationId: 'corr-member-kick-1',
+      guildId: 'guild-member-1',
+      memberUserId: 'member-1',
+      reason: 'guardian:neutralize-escalated-member',
+    },
+  ]);
+  expect(result.status).toBe(DiscordExecutionStatus.SUCCESS);
+});
+
+test('production service fails member moderation request without target identifiers', async () => {
+  const memberOperation: DiscordMemberModerationOperation = {
+    async banMember() {
+      return Object.freeze({ ok: true, statusCode: 204 });
+    },
+    async kickMember() {
+      return Object.freeze({ ok: true, statusCode: 204 });
+    },
+  };
+
+  const service = new ProductionDiscordExecutionService({ memberModerationOperation: memberOperation }, { maxAttempts: 2 });
+  const result = await service.member.kickMember({ correlationId: 'corr-member-missing-1' });
 
   expect(result.status).toBe(DiscordExecutionStatus.FAILED);
   const metadata = result.metadata as { error: { code: DiscordExecutionErrorCode; retryable: boolean } };

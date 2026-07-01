@@ -713,7 +713,15 @@ describe('IntegratedCanonicalGuardianRuntime dangerous role grant vertical slice
     await runtime.ingestGatewayEvent(replayEvent);
     await runtime.stop();
 
-    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(fetchSpy).toHaveBeenCalledTimes(3);
+    const replayRoleCalls = fetchSpy.mock.calls.filter((call) => String((call as unknown[])[0] ?? '').includes('/roles/'));
+    const replayKickCalls = fetchSpy.mock.calls.filter(
+      (call) => String((call as unknown[])[0] ?? '').includes('/members/') && !String((call as unknown[])[0] ?? '').includes('/roles/'),
+    );
+    const replayBanCalls = fetchSpy.mock.calls.filter((call) => String((call as unknown[])[0] ?? '').includes('/bans/'));
+    expect(replayRoleCalls).toHaveLength(1);
+    expect(replayKickCalls).toHaveLength(1);
+    expect(replayBanCalls).toHaveLength(1);
     expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
   });
 
@@ -846,5 +854,437 @@ describe('IntegratedCanonicalGuardianRuntime dangerous role grant vertical slice
       SecurityActionType.NOTIFY_AUDIT,
     ]);
     expect(fetchSpy).toHaveBeenCalled();
+  });
+});
+
+describe('IntegratedCanonicalGuardianRuntime dangerous role via invite abuse vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_TRUSTED_INVITER_IDS;
+    delete process.env.GUARDIAN_AUTHORIZED_BOT_IDS;
+    delete process.env.GUARDIAN_TRUSTED_BOT_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildJoinRoleCatalog() {
+    return Object.freeze([
+      Object.freeze({
+        roleId: 'role-onboarding-1',
+        name: 'Onboarding',
+        permissions: Object.freeze(['VIEW_CHANNEL']),
+        protectedRole: false,
+        privilegedRole: false,
+        dangerousRole: false,
+        nukerCapable: false,
+      }),
+      Object.freeze({
+        roleId: 'role-cosmetic-1',
+        name: 'Cosmetic',
+        permissions: Object.freeze(['VIEW_CHANNEL']),
+        protectedRole: false,
+        privilegedRole: false,
+        dangerousRole: false,
+        nukerCapable: false,
+      }),
+      Object.freeze({
+        roleId: 'role-dangerous-join-1',
+        name: 'Dangerous Join',
+        permissions: Object.freeze(['ADMINISTRATOR']),
+        protectedRole: false,
+        privilegedRole: true,
+        dangerousRole: true,
+        nukerCapable: true,
+      }),
+      Object.freeze({
+        roleId: 'role-protected-join-1',
+        name: 'Protected Join',
+        permissions: Object.freeze(['MANAGE_GUILD']),
+        protectedRole: true,
+        privilegedRole: false,
+        dangerousRole: false,
+        nukerCapable: false,
+      }),
+    ]);
+  }
+
+  function buildJoinEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      t: 'GUILD_MEMBER_ADD',
+      d: {
+        guildId: 'guild-join-slice-1',
+        actorId: 'inviter-join-slice-1',
+        memberUserId: 'member-join-slice-1',
+        roleIds: ['role-dangerous-join-1'],
+        roleCatalog: buildJoinRoleCatalog(),
+        ...overrides,
+      },
+      ts: '2026-07-01T16:00:00.000Z',
+    };
+  }
+
+  test('dangerous join role is contained through canonical runtime and production role adapter', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const plannerSpy = jest.spyOn(InMemorySecurityExecutionPlanner.prototype, 'plan');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-join-slice-1',
+      'guild-join-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildJoinEvent({ inviteCode: 'invite-join-1' }));
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    const firstCall = fetchSpy.mock.calls[0] as unknown[];
+    const url = firstCall[0] as string;
+    expect(url).toContain('/api/v10/guilds/guild-join-slice-1/members/member-join-slice-1/roles/role-dangerous-join-1');
+
+    const planCall = plannerSpy.mock.calls[plannerSpy.mock.calls.length - 1];
+    const actionPlan = planCall[0] as { actions: readonly { type: SecurityActionType }[] };
+    expect(actionPlan.actions.map((action) => action.type)).toEqual([
+      SecurityActionType.REMOVE_DANGEROUS_ROLE,
+      SecurityActionType.NEUTRALIZE_ESCALATED_MEMBER,
+      SecurityActionType.CREATE_INCIDENT,
+      SecurityActionType.NOTIFY_AUDIT,
+    ]);
+  });
+
+  test('onboarding and self-selectable roles do not trigger containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-join-slice-2',
+      'guild-join-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildJoinEvent({
+        memberUserId: 'member-onboarding-safe',
+        roleIds: ['role-onboarding-1'],
+        onboardingAssigned: true,
+      }),
+    );
+    await runtime.ingestGatewayEvent(
+      buildJoinEvent({
+        memberUserId: 'member-cosmetic-safe',
+        roleIds: ['role-cosmetic-1'],
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('trusted administrator cannot bypass mandatory containment for dangerous join role', async () => {
+    process.env.GUARDIAN_TRUSTED_INVITER_IDS = 'trusted-admin-inviter-1';
+
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-join-slice-3',
+      'guild-join-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildJoinEvent({
+        actorId: 'trusted-admin-inviter-1',
+        inviteCode: 'invite-trusted-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  test('duplicate/replay join events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-join-slice-replay',
+      'guild-join-slice-1',
+    );
+
+    const replayEvent = buildJoinEvent({
+      memberUserId: 'member-replay-join-1',
+      roleIds: ['role-dangerous-join-1'],
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    const replayRoleCalls = fetchSpy.mock.calls.filter((call) => String((call as unknown[])[0] ?? '').includes('/roles/'));
+    const replayKickCalls = fetchSpy.mock.calls.filter(
+      (call) => String((call as unknown[])[0] ?? '').includes('/members/') && !String((call as unknown[])[0] ?? '').includes('/roles/'),
+    );
+    expect(replayRoleCalls).toHaveLength(1);
+    expect(replayKickCalls).toHaveLength(1);
+    expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
+  });
+
+  test.each([403, 429, 500])(
+    'join dangerous role containment failure (%i) triggers recovery',
+    async (statusCode) => {
+      const fetchSpy = jest.fn(async (url: string) => {
+        if (url.includes('/roles/')) {
+          return createFetchResponse(statusCode);
+        }
+
+        return createFetchResponse(204);
+      });
+      (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+      const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+      const eventBus = new InMemoryEventBus();
+      const health = new RuntimeHealthService();
+      const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+      const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+      const runtime = new IntegratedCanonicalGuardianRuntime(
+        GuardianRuntimeMode.PRODUCTION,
+        runtimeManager,
+        new StubDiscordRuntimeAdapter(),
+        eventBus,
+        health,
+        loggerFactory,
+        `runtime-join-slice-fail-${statusCode}`,
+        'guild-join-slice-1',
+      );
+
+      await runtime.start();
+      await runtime.ingestGatewayEvent(
+        buildJoinEvent({
+          memberUserId: `member-join-fail-${statusCode}`,
+        }),
+      );
+      await runtime.stop();
+
+      expect(fetchSpy).toHaveBeenCalled();
+      expect(recoverySpy).toHaveBeenCalled();
+    },
+  );
+
+  test('role already removed is verified and does not trigger recovery', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/roles/')) {
+        return {
+          ...createFetchResponse(404),
+          json: async () => Object.freeze({ code: 'UNKNOWN_ROLE', message: 'Unknown Role' }),
+        };
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-join-slice-404',
+      'guild-join-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildJoinEvent({ memberUserId: 'member-join-404' }));
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).not.toHaveBeenCalled();
+  });
+
+  test('missing invite attribution does not block mandatory containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-join-slice-missing-attr',
+      'guild-join-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildJoinEvent({
+        inviteCode: undefined,
+        onboardingAssigned: false,
+        integrationAssigned: false,
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  test('rogue inviter attribution plans punishment action', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const plannerSpy = jest.spyOn(InMemorySecurityExecutionPlanner.prototype, 'plan');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-join-slice-rogue',
+      'guild-join-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildJoinEvent({
+        suspectedRogueAdminId: 'rogue-inviter-join-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+
+    const planCall = plannerSpy.mock.calls[plannerSpy.mock.calls.length - 1];
+    const actionPlan = planCall[0] as { actions: readonly { type: SecurityActionType }[] };
+    expect(actionPlan.actions.map((action) => action.type)).toEqual([
+      SecurityActionType.REMOVE_DANGEROUS_ROLE,
+      SecurityActionType.PUNISH_ROLE_ESCALATION_ACTOR,
+      SecurityActionType.NEUTRALIZE_ESCALATED_MEMBER,
+      SecurityActionType.CREATE_INCIDENT,
+      SecurityActionType.NOTIFY_AUDIT,
+    ]);
+  });
+
+  test('authorized/trusted bot joins remain on bot path and do not trigger role containment', async () => {
+    process.env.GUARDIAN_AUTHORIZED_BOT_IDS = 'bot-authorized-join-1';
+    process.env.GUARDIAN_TRUSTED_BOT_IDS = 'bot-trusted-join-1';
+
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-join-slice-bots',
+      'guild-join-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildJoinEvent({
+        memberUserId: 'bot-authorized-join-1',
+        botId: 'bot-authorized-join-1',
+        member: { user: { id: 'bot-authorized-join-1', bot: true } },
+      }),
+    );
+    await runtime.ingestGatewayEvent(
+      buildJoinEvent({
+        memberUserId: 'bot-trusted-join-1',
+        botId: 'bot-trusted-join-1',
+        member: { user: { id: 'bot-trusted-join-1', bot: true } },
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 });

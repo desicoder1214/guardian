@@ -32,6 +32,10 @@ import {
   ProductionDiscordPermissionOverwriteOperation,
   ProductionDiscordPermissionOverwriteOperationOptions,
 } from './discord-permission-overwrite-operation';
+import {
+  ProductionDiscordMemberModerationOperation,
+  ProductionDiscordMemberModerationOperationOptions,
+} from './discord-member-moderation-operation';
 
 export interface ProductionDiscordHttpRequest {
   readonly method: string;
@@ -199,6 +203,31 @@ function toPermissionOverwriteOperationOptions(
   });
 }
 
+function toMemberModerationOperationOptions(
+  options: ProductionDiscordExecutionAdapterOptions,
+): ProductionDiscordMemberModerationOperationOptions {
+  const fetchFn: NonNullable<ProductionDiscordMemberModerationOperationOptions['fetchFn']> = (
+    input,
+    init,
+  ) =>
+    options.httpClient.request(
+      Object.freeze({
+        method: init.method,
+        url: input,
+        headers: Object.freeze({ ...init.headers }),
+        body: init.body,
+      }),
+    );
+
+  return Object.freeze({
+    botToken: options.botToken,
+    apiBaseUrl: options.apiBaseUrl,
+    apiVersion: options.apiVersion,
+    userAgent: options.userAgent,
+    fetchFn,
+  });
+}
+
 export class ProductionDiscordExecutionAdapter implements DiscordExecutionService {
   readonly member: MemberExecutionService;
   readonly role: RoleExecutionService;
@@ -213,6 +242,9 @@ export class ProductionDiscordExecutionAdapter implements DiscordExecutionServic
   private readonly delegate: DiscordExecutionService;
 
   constructor(options: ProductionDiscordExecutionAdapterOptions) {
+    const memberModerationOperation = new ProductionDiscordMemberModerationOperation(
+      toMemberModerationOperationOptions(options),
+    );
     const botOperation = new ProductionDiscordBotRemovalOperation(toOperationOptions(options));
     const roleOperation = new ProductionDiscordRoleRemovalOperation(toRoleOperationOptions(options));
     const webhookOperation = new ProductionDiscordWebhookRemovalOperation(toWebhookOperationOptions(options));
@@ -224,6 +256,7 @@ export class ProductionDiscordExecutionAdapter implements DiscordExecutionServic
     );
     this.delegate = new ProductionDiscordExecutionService(
       {
+        memberModerationOperation,
         botRemovalOperation: botOperation,
         roleRemovalOperation: roleOperation,
         webhookRemovalOperation: webhookOperation,

@@ -128,6 +128,15 @@ export interface DiscordPermissionOverwriteExecutionRequest {
   readonly metadata?: Record<string, unknown>;
 }
 
+export interface DiscordMemberContainmentExecutionRequest {
+  readonly correlationId: string;
+  readonly guildId?: string;
+  readonly memberUserId?: string;
+  readonly idempotencyKey?: string;
+  readonly reason?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
 export interface DiscordBotRemovalOperationRequest {
   readonly correlationId: string;
   readonly guildId: string;
@@ -267,10 +276,38 @@ export interface DiscordPermissionOverwriteOperation {
   ): Promise<DiscordPermissionOverwriteOperationResponse>;
 }
 
+export interface DiscordMemberModerationOperationRequest {
+  readonly correlationId: string;
+  readonly guildId: string;
+  readonly memberUserId: string;
+  readonly reason?: string;
+}
+
+export interface DiscordMemberModerationOperationResponse {
+  readonly ok: boolean;
+  readonly statusCode: number;
+  readonly rateLimit?: {
+    readonly retryAfterMs?: number;
+    readonly bucketId?: string;
+    readonly global?: boolean;
+  };
+  readonly error?: {
+    readonly code?: string;
+    readonly message: string;
+    readonly retryable?: boolean;
+  };
+  readonly metadata?: Record<string, unknown>;
+}
+
+export interface DiscordMemberModerationOperation {
+  banMember(request: DiscordMemberModerationOperationRequest): Promise<DiscordMemberModerationOperationResponse>;
+  kickMember(request: DiscordMemberModerationOperationRequest): Promise<DiscordMemberModerationOperationResponse>;
+}
+
 export interface MemberExecutionService {
-  banMember(correlationId: string): Promise<DiscordExecutionResult>;
-  kickMember(correlationId: string): Promise<DiscordExecutionResult>;
-  removeRoles(correlationId: string): Promise<DiscordExecutionResult>;
+  banMember(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult>;
+  kickMember(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult>;
+  removeRoles(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult>;
 }
 
 export interface RoleExecutionService {
@@ -340,6 +377,7 @@ export interface ProductionDiscordExecutionServiceOptions {
 }
 
 export interface ProductionDiscordExecutionServiceDependencies {
+  readonly memberModerationOperation?: DiscordMemberModerationOperation;
   readonly botRemovalOperation?: DiscordBotRemovalOperation;
   readonly roleRemovalOperation?: DiscordRoleRemovalOperation;
   readonly webhookRemovalOperation?: DiscordWebhookRemovalOperation;
@@ -556,9 +594,29 @@ function resolvePermissionOverwriteIdempotencyKey(request: DiscordPermissionOver
   return request.idempotencyKey ?? request.correlationId;
 }
 
+function coerceMemberRequest(request: string | DiscordMemberContainmentExecutionRequest): DiscordMemberContainmentExecutionRequest {
+  if (typeof request === 'string') {
+    return Object.freeze({ correlationId: request, idempotencyKey: request });
+  }
+
+  return Object.freeze({
+    correlationId: request.correlationId,
+    guildId: request.guildId,
+    memberUserId: request.memberUserId,
+    idempotencyKey: request.idempotencyKey,
+    reason: request.reason,
+    metadata: freezeMetadata(request.metadata),
+  });
+}
+
+function resolveMemberIdempotencyKey(request: DiscordMemberContainmentExecutionRequest, operation: string): string {
+  return request.idempotencyKey ?? `${operation}:${request.correlationId}`;
+}
+
 function mapErrorCode(
   response?:
     | DiscordBotRemovalOperationResponse
+    | DiscordMemberModerationOperationResponse
     | DiscordRoleRemovalOperationResponse
     | DiscordWebhookRemovalOperationResponse
     | DiscordChannelContainmentOperationResponse
@@ -586,6 +644,7 @@ function mapErrorCode(
 function resolveFailureCode(
   response:
     | DiscordBotRemovalOperationResponse
+    | DiscordMemberModerationOperationResponse
     | DiscordRoleRemovalOperationResponse
     | DiscordWebhookRemovalOperationResponse
     | DiscordChannelContainmentOperationResponse
@@ -629,6 +688,14 @@ function isAlreadyRemoved(response: DiscordBotRemovalOperationResponse): boolean
 }
 
 function isPermissionFailure(response: DiscordBotRemovalOperationResponse): boolean {
+  return response.statusCode === 403 || response.error?.code === 'PERMISSION_DENIED' || response.error?.code === 'MISSING_PERMISSIONS';
+}
+
+function isMemberAlreadyRemoved(response: DiscordMemberModerationOperationResponse): boolean {
+  return response.statusCode === 404 || response.error?.code === 'ALREADY_REMOVED' || response.error?.code === 'UNKNOWN_MEMBER';
+}
+
+function isMemberPermissionFailure(response: DiscordMemberModerationOperationResponse): boolean {
   return response.statusCode === 403 || response.error?.code === 'PERMISSION_DENIED' || response.error?.code === 'MISSING_PERMISSIONS';
 }
 
@@ -685,16 +752,19 @@ abstract class BaseInMemoryExecutionService {
 }
 
 class InMemoryMemberExecutionService extends BaseInMemoryExecutionService implements MemberExecutionService {
-  async banMember(correlationId: string): Promise<DiscordExecutionResult> {
-    return this.buildResult('member', 'banMember', correlationId);
+  async banMember(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceMemberRequest(request);
+    return this.buildResult('member', 'banMember', normalizedRequest.correlationId);
   }
 
-  async kickMember(correlationId: string): Promise<DiscordExecutionResult> {
-    return this.buildResult('member', 'kickMember', correlationId);
+  async kickMember(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceMemberRequest(request);
+    return this.buildResult('member', 'kickMember', normalizedRequest.correlationId);
   }
 
-  async removeRoles(correlationId: string): Promise<DiscordExecutionResult> {
-    return this.buildResult('member', 'removeRoles', correlationId);
+  async removeRoles(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceMemberRequest(request);
+    return this.buildResult('member', 'removeRoles', normalizedRequest.correlationId);
   }
 }
 
@@ -786,15 +856,18 @@ class InMemoryBotExecutionService extends BaseInMemoryExecutionService implement
 }
 
 class UnsupportedMemberExecutionService implements MemberExecutionService {
-  async banMember(correlationId: string): Promise<DiscordExecutionResult> {
+  async banMember(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
     return unsupportedResult('member', 'banMember', correlationId);
   }
 
-  async kickMember(correlationId: string): Promise<DiscordExecutionResult> {
+  async kickMember(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
     return unsupportedResult('member', 'kickMember', correlationId);
   }
 
-  async removeRoles(correlationId: string): Promise<DiscordExecutionResult> {
+  async removeRoles(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
     return unsupportedResult('member', 'removeRoles', correlationId);
   }
 }
@@ -1077,6 +1150,218 @@ export class ProductionDiscordBotExecutionService implements BotExecutionService
           cause: lastFailureCause !== undefined ? parseFailureCause(lastFailureCause) : undefined,
         },
         metadata: Object.freeze({
+          statusCode: lastFailure?.statusCode,
+          ...lastFailure?.metadata,
+          ...normalizedRequest.metadata,
+        }),
+      },
+    });
+  }
+}
+
+export class ProductionDiscordMemberExecutionService implements MemberExecutionService {
+  private readonly completedByIdempotencyKey = new Map<string, DiscordExecutionResult>();
+  private readonly maxAttempts: number;
+
+  constructor(
+    private readonly operation: DiscordMemberModerationOperation,
+    options: ProductionDiscordExecutionServiceOptions = {},
+  ) {
+    const merged = { ...DEFAULT_PRODUCTION_OPTIONS, ...options };
+    this.maxAttempts = Math.max(1, Math.floor(merged.maxAttempts));
+  }
+
+  async banMember(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    return this.executeMemberModeration(request, 'ban');
+  }
+
+  async kickMember(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    return this.executeMemberModeration(request, 'kick');
+  }
+
+  async removeRoles(request: string | DiscordMemberContainmentExecutionRequest): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceMemberRequest(request);
+    return unsupportedResult('member', 'removeRoles', normalizedRequest.correlationId);
+  }
+
+  private async executeMemberModeration(
+    request: string | DiscordMemberContainmentExecutionRequest,
+    moderation: 'ban' | 'kick',
+  ): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceMemberRequest(request);
+    const operationName = moderation === 'ban' ? 'BAN_MEMBER' : 'KICK_MEMBER';
+    const idempotencyKey = resolveMemberIdempotencyKey(normalizedRequest, operationName);
+    const cached = this.completedByIdempotencyKey.get(idempotencyKey);
+    if (cached) {
+      const metadata = cached.metadata as FrozenExecutionMetadata | undefined;
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.SKIPPED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'REMOVE_UNAUTHORIZED_BOT',
+          idempotencyKey,
+          httpStatus: metadata?.httpStatus ?? 200,
+          verification: {
+            outcome: metadata?.verification?.outcome ?? DiscordBotRemovalVerificationOutcome.SUCCESS,
+          },
+          duplicate: true,
+          retry: metadata?.retry ?? {
+            bounded: true,
+            attemptCount: 1,
+            maxAttempts: this.maxAttempts,
+            exhausted: false,
+          },
+          rateLimit: metadata?.rateLimit ?? { limited: false },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    if (!normalizedRequest.guildId || !normalizedRequest.memberUserId) {
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.FAILED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'REMOVE_UNAUTHORIZED_BOT',
+          idempotencyKey,
+          httpStatus: 0,
+          verification: { outcome: DiscordBotRemovalVerificationOutcome.FAILURE },
+          retry: {
+            bounded: true,
+            attemptCount: 0,
+            maxAttempts: this.maxAttempts,
+            exhausted: true,
+          },
+          rateLimit: { limited: false },
+          error: {
+            code: DiscordExecutionErrorCode.VALIDATION_ERROR,
+            message: 'guildId and memberUserId are required for production member execution',
+            retryable: false,
+          },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    let attemptCount = 0;
+    const startedAt = nowMs();
+    let lastFailure: DiscordMemberModerationOperationResponse | undefined;
+    let lastFailureCause: unknown;
+
+    while (attemptCount < this.maxAttempts) {
+      attemptCount += 1;
+      try {
+        const response =
+          moderation === 'ban'
+            ? await this.operation.banMember({
+                correlationId: normalizedRequest.correlationId,
+                guildId: normalizedRequest.guildId,
+                memberUserId: normalizedRequest.memberUserId,
+                reason: normalizedRequest.reason,
+              })
+            : await this.operation.kickMember({
+                correlationId: normalizedRequest.correlationId,
+                guildId: normalizedRequest.guildId,
+                memberUserId: normalizedRequest.memberUserId,
+                reason: normalizedRequest.reason,
+              });
+
+        if (response.ok || isMemberAlreadyRemoved(response)) {
+          const verificationOutcome = isMemberAlreadyRemoved(response)
+            ? DiscordBotRemovalVerificationOutcome.ALREADY_REMOVED
+            : DiscordBotRemovalVerificationOutcome.SUCCESS;
+
+          const successResult = freezeExecutionResult({
+            status: DiscordExecutionStatus.SUCCESS,
+            executionTimeMs: Math.max(0, nowMs() - startedAt),
+            correlationId: normalizedRequest.correlationId,
+            metadata: {
+              operation: 'REMOVE_UNAUTHORIZED_BOT',
+              idempotencyKey,
+              httpStatus: response.statusCode,
+              verification: {
+                outcome: verificationOutcome,
+              },
+              retry: {
+                bounded: true,
+                attemptCount,
+                maxAttempts: this.maxAttempts,
+                exhausted: false,
+              },
+              rateLimit: {
+                limited: false,
+                retryAfterMs: response.rateLimit?.retryAfterMs,
+                bucketId: response.rateLimit?.bucketId,
+                global: response.rateLimit?.global,
+              },
+              metadata: Object.freeze({
+                moderation,
+                statusCode: response.statusCode,
+                ...response.metadata,
+                ...normalizedRequest.metadata,
+              }),
+            },
+          });
+          this.completedByIdempotencyKey.set(idempotencyKey, successResult);
+          return successResult;
+        }
+
+        lastFailure = response;
+        const isRetryable = Boolean(response.error?.retryable) || response.statusCode === 429;
+        if (!isRetryable) {
+          break;
+        }
+      } catch (error) {
+        lastFailureCause = error;
+      }
+    }
+
+    const failureCode = resolveFailureCode(lastFailure, lastFailureCause);
+    const failureMessage = lastFailure?.error?.message ?? parseFailureCause(lastFailureCause);
+    const permissionFailure = lastFailure ? isMemberPermissionFailure(lastFailure) : false;
+    const verificationOutcome = permissionFailure
+      ? DiscordBotRemovalVerificationOutcome.PERMISSION_FAILURE
+      : failureCode === DiscordExecutionErrorCode.UNKNOWN_ERROR
+        ? DiscordBotRemovalVerificationOutcome.UNKNOWN_ERROR
+        : DiscordBotRemovalVerificationOutcome.FAILURE;
+    const retryable =
+      lastFailure?.error?.retryable ??
+      (failureCode === DiscordExecutionErrorCode.RATE_LIMITED ||
+        failureCode === DiscordExecutionErrorCode.NETWORK_ERROR);
+
+    return freezeExecutionResult({
+      status: DiscordExecutionStatus.FAILED,
+      executionTimeMs: Math.max(0, nowMs() - startedAt),
+      correlationId: normalizedRequest.correlationId,
+      metadata: {
+        operation: 'REMOVE_UNAUTHORIZED_BOT',
+        idempotencyKey,
+        httpStatus: lastFailure?.statusCode ?? 0,
+        verification: {
+          outcome: verificationOutcome,
+        },
+        retry: {
+          bounded: true,
+          attemptCount,
+          maxAttempts: this.maxAttempts,
+          exhausted: true,
+        },
+        rateLimit: {
+          limited: failureCode === DiscordExecutionErrorCode.RATE_LIMITED,
+          retryAfterMs: lastFailure?.rateLimit?.retryAfterMs,
+          bucketId: lastFailure?.rateLimit?.bucketId,
+          global: lastFailure?.rateLimit?.global,
+        },
+        error: {
+          code: failureCode,
+          message: failureMessage,
+          retryable,
+          cause: lastFailureCause !== undefined ? parseFailureCause(lastFailureCause) : undefined,
+        },
+        metadata: Object.freeze({
+          moderation,
           statusCode: lastFailure?.statusCode,
           ...lastFailure?.metadata,
           ...normalizedRequest.metadata,
@@ -1867,7 +2152,7 @@ export class ProductionDiscordChannelExecutionService implements ChannelExecutio
 }
 
 export class ProductionDiscordExecutionService implements DiscordExecutionService {
-  readonly member: MemberExecutionService = new UnsupportedMemberExecutionService();
+  readonly member: MemberExecutionService;
   readonly role: RoleExecutionService;
   readonly channel: ChannelExecutionService;
   readonly webhook: WebhookExecutionService;
@@ -1885,6 +2170,10 @@ export class ProductionDiscordExecutionService implements DiscordExecutionServic
       typeof (operationOrDependencies as DiscordBotRemovalOperation).removeUnauthorizedBot === 'function'
         ? { botRemovalOperation: operationOrDependencies as DiscordBotRemovalOperation }
         : (operationOrDependencies as ProductionDiscordExecutionServiceDependencies);
+
+    this.member = dependencies.memberModerationOperation
+      ? new ProductionDiscordMemberExecutionService(dependencies.memberModerationOperation, options)
+      : new UnsupportedMemberExecutionService();
 
     this.bot = dependencies.botRemovalOperation
       ? new ProductionDiscordBotExecutionService(dependencies.botRemovalOperation, options)

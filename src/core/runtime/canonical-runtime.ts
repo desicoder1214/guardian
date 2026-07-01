@@ -71,6 +71,7 @@ import {
   ProductionDiscordRestClient,
 } from './discord/production-discord-rest-client';
 import { DiscordBotExecutor } from './discord/security-bot-executor';
+import { DiscordMemberExecutor } from './discord/security-member-executor';
 import { DiscordRoleExecutor } from './discord/security-role-executor';
 import {
   InMemorySecurityDecisionEngine,
@@ -81,6 +82,13 @@ import {
   RecoveryOperationType,
 } from './recovery/recovery-engine';
 import { DiscordGatewayNormalizedEvent } from './discord/pipeline-types';
+import {
+  AbusedInviteAttributionStatus,
+  AbusedInviteDangerousRoleJoinTrigger,
+  DangerousRoleJoinMemberRecord,
+  DangerousRoleRoleRecord,
+  InMemoryAbusedInviteDangerousRoleJoinProtectionFoundation,
+} from './security/abused-invite-dangerous-role-join-protection-foundation';
 
 enum EnterpriseOperationalScenario {
   UNAUTHORIZED_BOT_ADDITION = 'UNAUTHORIZED_BOT_ADDITION',
@@ -379,6 +387,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private readonly executionPlanner = new InMemorySecurityExecutionPlanner();
   private readonly executionOrchestrator: InMemorySecurityExecutionOrchestrator;
   private readonly recoveryEngine = new InMemoryRecoveryEngine();
+  private readonly inviteDangerousRoleJoinFoundation = new InMemoryAbusedInviteDangerousRoleJoinProtectionFoundation();
   private readonly trustedInviterIds: readonly string[];
   private readonly runtimeAuthorizedBotIds: readonly string[];
   private readonly runtimeTrustedBotIds: readonly string[];
@@ -427,6 +436,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.registerRouterActionExecutors(actionExecutorRegistry);
 
     domainExecutorRegistry.register(new DiscordBotExecutor(this.executionService));
+    domainExecutorRegistry.register(new DiscordMemberExecutor(this.executionService));
     domainExecutorRegistry.register(new DiscordRoleExecutor(this.executionService));
 
     const executionRouter = new InMemorySecurityExecutionRouter(actionExecutorRegistry);
@@ -680,6 +690,16 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       return roleId;
     }
 
+    const roleIds = this.readStringArray(record, 'roleIds');
+    if (roleIds.length > 0) {
+      return roleIds[0];
+    }
+
+    const roles = this.readStringArray(record, 'roles');
+    if (roles.length > 0) {
+      return roles[0];
+    }
+
     const after = this.readRecord(record?.after);
     const afterRole = this.readRecord(after?.role);
     return this.readString(afterRole, 'id', 'roleId', 'role_id');
@@ -710,6 +730,184 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       punishActor,
       neutralizeTarget,
       protectedRole,
+    });
+  }
+
+  private mergeRoleContainmentPolicyFromDetections(
+    roleContainmentPolicy: {
+      readonly punishActor: boolean;
+      readonly neutralizeTarget: boolean;
+      readonly protectedRole: boolean;
+    },
+    detectionResults: readonly DetectionResult[],
+  ): {
+    readonly punishActor: boolean;
+    readonly neutralizeTarget: boolean;
+    readonly protectedRole: boolean;
+  } {
+    const inviteAbuse = detectionResults.find(
+      (result) => result.detectorId === 'dangerous-role-invite-abuse-detector' && result.matched,
+    );
+    const metadata = inviteAbuse?.metadata && typeof inviteAbuse.metadata === 'object'
+      ? (inviteAbuse.metadata as Record<string, unknown>)
+      : undefined;
+
+    return Object.freeze({
+      punishActor: typeof metadata?.policyPunishActor === 'boolean'
+        ? metadata.policyPunishActor
+        : roleContainmentPolicy.punishActor,
+      neutralizeTarget: typeof metadata?.policyNeutralizeTarget === 'boolean'
+        ? metadata.policyNeutralizeTarget
+        : roleContainmentPolicy.neutralizeTarget,
+      protectedRole: typeof metadata?.protectedRole === 'boolean'
+        ? metadata.protectedRole
+        : roleContainmentPolicy.protectedRole,
+    });
+  }
+
+  private readInviteDangerousRoleCatalog(payload: unknown): readonly DangerousRoleRoleRecord[] {
+    const record = this.readRecord(payload);
+    const candidate = record?.roleCatalog;
+    if (!Array.isArray(candidate)) {
+      return Object.freeze([]);
+    }
+
+    const catalog: DangerousRoleRoleRecord[] = [];
+    for (const entry of candidate) {
+      const roleRecord = this.readRecord(entry);
+      const roleId = this.readString(roleRecord, 'roleId', 'role_id', 'id');
+      if (!roleId) {
+        continue;
+      }
+
+      catalog.push(
+        Object.freeze({
+          roleId,
+          name: this.readString(roleRecord, 'name'),
+          permissions: Object.freeze([
+            ...this.readStringArray(roleRecord, 'permissions'),
+          ]),
+          protectedRole: this.readBoolean(roleRecord, 'protectedRole', 'protected_role') === true,
+          privilegedRole: this.readBoolean(roleRecord, 'privilegedRole', 'privileged_role') === true,
+          dangerousRole: this.readBoolean(roleRecord, 'dangerousRole', 'dangerous_role') === true,
+          nukerCapable: this.readBoolean(roleRecord, 'nukerCapable', 'nuker_capable') === true,
+        }),
+      );
+    }
+
+    return Object.freeze(catalog);
+  }
+
+  private readJoinMemberRecord(payload: unknown): DangerousRoleJoinMemberRecord | undefined {
+    const record = this.readRecord(payload);
+    const memberId = this.readMemberUserId(payload);
+    if (!memberId) {
+      return undefined;
+    }
+
+    const roleIds = this.readStringArray(record, 'roleIds');
+    const roles = this.readStringArray(record, 'roles');
+
+    return Object.freeze({
+      memberId,
+      roleIds: Object.freeze(roleIds.length > 0 ? [...roleIds] : [...roles]),
+      joinedAt: this.readString(record, 'joinedAt', 'joined_at'),
+      inviteCode: this.readString(record, 'inviteCode', 'invite_code'),
+      trusted: this.readBoolean(record, 'trusted', 'trustedMember') === true,
+      owner: this.readBoolean(record, 'owner', 'guildOwner') === true,
+      integrationAssigned: this.readBoolean(record, 'integrationAssigned', 'integration_assigned') === true,
+      onboardingAssigned: this.readBoolean(record, 'onboardingAssigned', 'onboarding_assigned') === true,
+      suspectedRogueAdminId: this.readString(record, 'suspectedRogueAdminId', 'suspected_rogue_admin_id', 'inviterId', 'inviter_id'),
+    });
+  }
+
+  private async evaluateInviteDangerousRoleJoinDetection(
+    event: DiscordGatewayNormalizedEvent,
+    actorId: string,
+  ): Promise<DetectionResult | undefined> {
+    if (event.eventName !== 'GUILD_MEMBER_ADD') {
+      return undefined;
+    }
+
+    if (this.isBotAddEvent(event.eventName, event.payload)) {
+      return undefined;
+    }
+
+    const joinedMember = this.readJoinMemberRecord(event.payload);
+    const roleCatalog = this.readInviteDangerousRoleCatalog(event.payload);
+
+    if (!joinedMember || roleCatalog.length === 0) {
+      return undefined;
+    }
+
+    const report = await this.inviteDangerousRoleJoinFoundation.evaluate(
+      Object.freeze({
+        correlationId: event.correlationId,
+        transactionId: event.correlationId,
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        trigger: AbusedInviteDangerousRoleJoinTrigger.GUILD_MEMBER_ADD,
+        joinedMember,
+        roleCatalog,
+        metadata: Object.freeze({ source: 'canonical-guardian-runtime' }),
+      }),
+    );
+
+    const matched = report.success && report.containmentRequired;
+    const primaryMember = report.memberReports[0];
+    const roleId = primaryMember?.dangerousRoleIds[0]
+      ?? primaryMember?.privilegedRoleIds[0]
+      ?? primaryMember?.nukerCapableRoleIds[0]
+      ?? primaryMember?.protectedRoleIds[0]
+      ?? joinedMember.roleIds[0];
+    const policyPunishActor =
+      (primaryMember?.punishmentSuppressed ?? false)
+        ? false
+        : primaryMember?.attributionStatus === AbusedInviteAttributionStatus.ROGUE_ADMIN_SUSPECTED;
+
+    return Object.freeze({
+      detectorId: 'dangerous-role-invite-abuse-detector',
+      matched,
+      findings: Object.freeze([
+        Object.freeze({
+          detectorId: 'dangerous-role-invite-abuse-detector',
+          severity: matched ? DetectionSeverity.CRITICAL : DetectionSeverity.INFO,
+          confidence: matched ? DetectionConfidence.HIGH : DetectionConfidence.CERTAIN,
+          disposition: matched ? DetectionDisposition.MALICIOUS : DetectionDisposition.CLEAN,
+          reason: matched
+            ? 'Dangerous role join via invite/onboarding context detected'
+            : 'No dangerous role join detected',
+          correlationId: event.correlationId,
+          metadata: Object.freeze({
+            protectionId: report.protectionId,
+            containmentRequired: report.containmentRequired,
+            classification: report.classification,
+          }),
+        }),
+      ]),
+      correlationId: event.correlationId,
+      metadata: Object.freeze({
+        source: 'canonical-guardian-runtime',
+        protectionId: report.protectionId,
+        containmentRequired: report.containmentRequired,
+        classification: report.classification,
+        memberUserId: joinedMember.memberId,
+        roleId,
+        protectedRole: (primaryMember?.protectedRoleIds.length ?? 0) > 0,
+        policyPunishActor,
+        policyNeutralizeTarget: matched,
+        inviteAttributionStatus: primaryMember?.attributionStatus,
+        runtimeThreatOverrides: matched
+          ? Object.freeze([
+              Object.freeze({
+                type: 'FORCE_BLOCK',
+                applicableEventTypes: Object.freeze(['ROLE_CREATE']),
+                reason: 'mandatory dangerous role join containment',
+                metadata: Object.freeze({ source: 'dangerous-role-invite-abuse-detector' }),
+              }),
+            ])
+          : Object.freeze([]),
+      }),
     });
   }
 
@@ -1027,7 +1225,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     }
 
     const record = payload as Record<string, unknown>;
-    const candidates = ['actorId', 'actor_id', 'userId', 'user_id', 'executorId', 'executor_id'];
+    const candidates = ['actorId', 'actor_id', 'userId', 'user_id', 'executorId', 'executor_id', 'inviterId', 'inviter_id'];
     for (const key of candidates) {
       const value = record[key];
       if (typeof value === 'string' && value.trim().length > 0) {
@@ -1040,7 +1238,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
   private async handleEvent(event: DiscordGatewayNormalizedEvent): Promise<void> {
     const scenarioContract = resolveEnterpriseScenarioContract(event.eventName, event.payload);
-    const actionType = scenarioContract?.actionType ?? this.resolvePolicyActionType(event.eventName);
+    let actionType = scenarioContract?.actionType ?? this.resolvePolicyActionType(event.eventName);
 
     if (scenarioContract && !scenarioContract.supportedByCanonicalDetectorPath) {
       this.logger.warn('Canonical Guardian scenario fail-closed', {
@@ -1062,6 +1260,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const roleId = this.readRoleId(event.payload);
     const roleContainmentPolicy = this.readRoleContainmentPolicy(event.payload);
     const botAddEvent = this.isBotAddEvent(event.eventName, event.payload);
+
+    if (event.eventName === 'GUILD_MEMBER_ADD' && !botAddEvent) {
+      actionType = PolicyActionType.ROLE_CREATE;
+    }
 
     if (actionType === PolicyActionType.BOT_ADD && botAddEvent && !botId) {
       this.logger.warn('Canonical Guardian scenario fail-closed', {
@@ -1125,6 +1327,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       }),
     );
 
+    const inviteJoinDetection = await this.evaluateInviteDangerousRoleJoinDetection(event, actorId);
+    const effectiveDetectionResults = inviteJoinDetection
+      ? Object.freeze([...detectionResults, inviteJoinDetection])
+      : detectionResults;
+
     this.logger.info('Canonical Guardian detector path evaluated', {
       runtimeId: this.runtimeId,
       guildId: this.guildId,
@@ -1134,13 +1341,18 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       actionType,
       actorId,
       botId,
-      detectorCount: detectionResults.length,
-      matchedDetectorCount: detectionResults.filter((result) => result.matched).length,
+      detectorCount: effectiveDetectionResults.length,
+      matchedDetectorCount: effectiveDetectionResults.filter((result) => result.matched).length,
     });
 
     if (
       actionType === PolicyActionType.ROLE_CREATE &&
-      !detectionResults.some((result) => result.detectorId === 'dangerous-role-grant-detector' && result.matched)
+      !effectiveDetectionResults.some(
+        (result) =>
+          (result.detectorId === 'dangerous-role-grant-detector' ||
+            result.detectorId === 'dangerous-role-invite-abuse-detector') &&
+          result.matched,
+      )
     ) {
       this.logger.info('Canonical Guardian dangerous role containment not required', {
         runtimeId: this.runtimeId,
@@ -1155,9 +1367,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       return;
     }
 
-    this.securityEvaluationPipeline.stageDetectionResults(detectionResults);
+    this.securityEvaluationPipeline.stageDetectionResults(effectiveDetectionResults);
     const decision = await this.securityEvaluationPipeline.evaluate(event, actorId, actionType);
-    const botDetectionMetadata = this.readUnauthorizedBotDetectionMetadata(detectionResults);
+    const botDetectionMetadata = this.readUnauthorizedBotDetectionMetadata(effectiveDetectionResults);
+    const effectiveRoleContainmentPolicy = this.mergeRoleContainmentPolicyFromDetections(
+      roleContainmentPolicy,
+      effectiveDetectionResults,
+    );
     const enrichedDecision = this.enrichDecisionMetadata(
       decision,
       event,
@@ -1165,7 +1381,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       botId,
       memberUserId,
       roleId,
-      roleContainmentPolicy,
+      effectiveRoleContainmentPolicy,
       botAddEvent,
       botDetectionMetadata.unauthorizedBotDetected,
       botDetectionMetadata.isAuthorizedBot,
@@ -1188,6 +1404,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       Object.freeze({
         discordExecutionService: this.executionService,
         botExecutor: new DiscordBotExecutor(this.executionService),
+        memberExecutor: new DiscordMemberExecutor(this.executionService),
         roleExecutor: new DiscordRoleExecutor(this.executionService),
       }),
     );
