@@ -64,7 +64,9 @@ const SUPPORTED_SCENARIOS = Object.freeze([
   { scenario: 'DANGEROUS_WEBHOOK_CREATION', eventName: 'WEBHOOK_CREATE', expectedActionType: 'WEBHOOK_CREATE' },
   { scenario: 'WEBHOOK_MODIFICATION', eventName: 'WEBHOOK_MODIFICATION', expectedActionType: 'WEBHOOK_DELETE' },
   { scenario: 'DANGEROUS_ROLE_GRANT', eventName: 'GUILD_MEMBER_UPDATE', expectedActionType: 'ROLE_CREATE' },
+  { scenario: 'UNAUTHORIZED_ROLE_DELETION', eventName: 'ROLE_DELETE', expectedActionType: 'ROLE_DELETE' },
   { scenario: 'PRIVILEGED_PERMISSION_ESCALATION', eventName: 'PRIVILEGED_PERMISSION_ESCALATION', expectedActionType: 'ROLE_CREATE' },
+  { scenario: 'UNAUTHORIZED_CHANNEL_CREATION', eventName: 'CHANNEL_CREATE', expectedActionType: 'CHANNEL_CREATE' },
   { scenario: 'CHANNEL_PERMISSION_DRIFT', eventName: 'CHANNEL_PERMISSION_DRIFT', expectedActionType: 'CHANNEL_DELETE' },
 ]);
 
@@ -1590,6 +1592,559 @@ describe('IntegratedCanonicalGuardianRuntime channel deletion abuse vertical sli
       (url) =>
         url.includes('/api/v10/guilds/guild-channel-slice-1/members/actor-channel-burst-1') ||
         url.includes('/api/v10/guilds/guild-channel-slice-1/bans/actor-channel-burst-1'),
+    );
+    expect(punishmentCalls).toHaveLength(1);
+  });
+});
+
+describe('IntegratedCanonicalGuardianRuntime channel creation abuse vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_AUTHORIZED_CHANNEL_IDS;
+    delete process.env.GUARDIAN_TRUSTED_CHANNEL_ADMIN_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildChannelCreateEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      t: 'CHANNEL_CREATE',
+      d: {
+        guildId: 'guild-channel-create-slice-1',
+        actorId: 'actor-channel-create-slice-1',
+        channelId: 'channel-dangerous-create-1',
+        targetId: 'channel-dangerous-create-1',
+        ...overrides,
+      },
+      ts: '2026-07-01T17:15:00.000Z',
+    };
+  }
+
+  test('unauthorized channel creation executes channel containment and actor punishment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-create-slice-1',
+      'guild-channel-create-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildChannelCreateEvent());
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/channels/channel-dangerous-create-1'))).toBe(true);
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-channel-create-slice-1/members/actor-channel-create-slice-1') ||
+          url.includes('/api/v10/guilds/guild-channel-create-slice-1/bans/actor-channel-create-slice-1'),
+      ),
+    ).toBe(true);
+  });
+
+  test('trusted channel creation performs no containment', async () => {
+    process.env.GUARDIAN_AUTHORIZED_CHANNEL_IDS = 'channel-safe-create-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-create-slice-2',
+      'guild-channel-create-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildChannelCreateEvent({
+        channelId: 'channel-safe-create-1',
+        targetId: 'channel-safe-create-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('IntegratedCanonicalGuardianRuntime role deletion abuse vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_AUTHORIZED_ROLE_IDS;
+    delete process.env.GUARDIAN_TRUSTED_ROLE_ADMIN_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildRoleDeleteEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      t: 'ROLE_DELETE',
+      d: {
+        guildId: 'guild-role-delete-slice-1',
+        actorId: 'actor-role-delete-slice-1',
+        roleId: 'role-deleted-dangerous-1',
+        targetId: 'role-deleted-dangerous-1',
+        ...overrides,
+      },
+      ts: '2026-07-01T18:00:00.000Z',
+    };
+  }
+
+  test('unauthorized role deletion executes mandatory actor punishment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-delete-slice-1',
+      'guild-role-delete-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildRoleDeleteEvent());
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-role-delete-slice-1/members/actor-role-delete-slice-1') ||
+          url.includes('/api/v10/guilds/guild-role-delete-slice-1/bans/actor-role-delete-slice-1'),
+      ),
+    ).toBe(true);
+  });
+
+  test('authorized role deletion performs no containment', async () => {
+    process.env.GUARDIAN_AUTHORIZED_ROLE_IDS = 'role-safe-admin-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-delete-slice-2',
+      'guild-role-delete-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleDeleteEvent({
+        roleId: 'role-safe-admin-1',
+        targetId: 'role-safe-admin-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('trusted role administrator policy is respected', async () => {
+    process.env.GUARDIAN_TRUSTED_ROLE_ADMIN_IDS = 'trusted-role-admin-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-delete-slice-3',
+      'guild-role-delete-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleDeleteEvent({
+        actorId: 'trusted-role-admin-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('duplicate/replay role deletion events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-delete-slice-4',
+      'guild-role-delete-slice-1',
+    );
+
+    const replayEvent = buildRoleDeleteEvent({
+      actorId: 'actor-role-delete-replay-1',
+      roleId: 'role-deleted-replay-1',
+      targetId: 'role-deleted-replay-1',
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    const punishmentCalls = fetchSpy.mock.calls.filter((call) => {
+      const url = String((call as unknown[])[0] ?? '');
+      return (
+        url.includes('/api/v10/guilds/guild-role-delete-slice-1/members/actor-role-delete-replay-1') ||
+        url.includes('/api/v10/guilds/guild-role-delete-slice-1/bans/actor-role-delete-replay-1')
+      );
+    });
+    expect(punishmentCalls).toHaveLength(1);
+    expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
+  });
+
+  test('missing audit log still performs mandatory role deletion containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-delete-slice-5',
+      'guild-role-delete-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleDeleteEvent({
+        actorId: 'actor-role-delete-no-audit-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+  });
+
+  test('late audit attribution still allows actor punishment on later deletion', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-delete-slice-6',
+      'guild-role-delete-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleDeleteEvent({
+        actorId: 'unknown-actor',
+        roleId: 'role-deleted-late-audit-1',
+        targetId: 'role-deleted-late-audit-1',
+      }),
+    );
+    await runtime.ingestGatewayEvent(
+      buildRoleDeleteEvent({
+        actorId: 'unknown-actor',
+        roleId: 'role-deleted-late-audit-2',
+        targetId: 'role-deleted-late-audit-2',
+        auditLogEntry: {
+          id: 'audit-role-delete-late-1',
+          actionType: 'ROLE_DELETE',
+          actorId: 'actor-role-delete-late-audit-1',
+          targetId: 'role-deleted-late-audit-2',
+          resourceId: 'role-deleted-late-audit-2',
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-role-delete-slice-1/members/actor-role-delete-late-audit-1') ||
+          url.includes('/api/v10/guilds/guild-role-delete-slice-1/bans/actor-role-delete-late-audit-1'),
+      ),
+    ).toBe(true);
+  });
+
+  test.each([403, 429, 500])(
+    'role deletion containment failure (%i) triggers recovery scheduling',
+    async (statusCode) => {
+      const fetchSpy = jest.fn(async (url: string) => {
+        if (url.includes('/api/v10/guilds/guild-role-delete-slice-1/members/actor-role-delete-fail-')) {
+          return createFetchResponse(statusCode);
+        }
+
+        return createFetchResponse(204);
+      });
+      (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+      const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+      const eventBus = new InMemoryEventBus();
+      const health = new RuntimeHealthService();
+      const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+      const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+      const runtime = new IntegratedCanonicalGuardianRuntime(
+        GuardianRuntimeMode.PRODUCTION,
+        runtimeManager,
+        new StubDiscordRuntimeAdapter(),
+        eventBus,
+        health,
+        loggerFactory,
+        `runtime-role-delete-slice-fail-${statusCode}`,
+        'guild-role-delete-slice-1',
+      );
+
+      await runtime.start();
+      await runtime.ingestGatewayEvent(
+        buildRoleDeleteEvent({
+          actorId: `actor-role-delete-fail-${statusCode}`,
+          roleId: `role-deleted-fail-${statusCode}`,
+          targetId: `role-deleted-fail-${statusCode}`,
+        }),
+      );
+      await runtime.stop();
+
+      expect(fetchSpy).toHaveBeenCalled();
+      expect(recoverySpy).toHaveBeenCalled();
+    },
+  );
+
+  test('role deletion punishment 404 is treated as verified containment and does not trigger recovery', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/api/v10/guilds/guild-role-delete-slice-1/members/')) {
+        return {
+          ...createFetchResponse(404),
+          json: async () => Object.freeze({ code: 'UNKNOWN_MEMBER', message: 'Unknown Member' }),
+        };
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-delete-slice-404',
+      'guild-role-delete-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleDeleteEvent({
+        actorId: 'actor-role-delete-404',
+        roleId: 'role-deleted-404',
+        targetId: 'role-deleted-404',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).not.toHaveBeenCalled();
+  });
+
+  test('partial role recovery path is triggered when role cleanup fails after moderation succeeds', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/roles/role-deleted-partial-1')) {
+        return createFetchResponse(500);
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-delete-slice-partial',
+      'guild-role-delete-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleDeleteEvent({
+        actorId: 'actor-role-delete-partial-1',
+        memberUserId: 'member-role-delete-partial-1',
+        roleId: 'role-deleted-partial-1',
+        targetId: 'role-deleted-partial-1',
+      }),
+    );
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/guilds/guild-role-delete-slice-1/members/member-role-delete-partial-1/roles/role-deleted-partial-1'))).toBe(true);
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-role-delete-slice-1/members/actor-role-delete-partial-1') ||
+          url.includes('/api/v10/guilds/guild-role-delete-slice-1/bans/actor-role-delete-partial-1') ||
+          url.includes('/api/v10/guilds/guild-role-delete-slice-1/members/member-role-delete-partial-1') ||
+          url.includes('/api/v10/guilds/guild-role-delete-slice-1/bans/member-role-delete-partial-1'),
+      ),
+    ).toBe(true);
+    expect(recoverySpy).toHaveBeenCalled();
+  });
+
+  test('multiple role deletions in parallel are contained while actor punishment executes once', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-delete-slice-7',
+      'guild-role-delete-slice-1',
+    );
+
+    await runtime.start();
+    await Promise.all([
+      runtime.ingestGatewayEvent(
+        buildRoleDeleteEvent({
+          actorId: 'actor-role-delete-burst-1',
+          roleId: 'role-deleted-burst-1',
+          targetId: 'role-deleted-burst-1',
+        }),
+      ),
+      runtime.ingestGatewayEvent(
+        buildRoleDeleteEvent({
+          actorId: 'actor-role-delete-burst-1',
+          roleId: 'role-deleted-burst-2',
+          targetId: 'role-deleted-burst-2',
+        }),
+      ),
+    ]);
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    const punishmentCalls = urls.filter(
+      (url) =>
+        url.includes('/api/v10/guilds/guild-role-delete-slice-1/members/actor-role-delete-burst-1') ||
+        url.includes('/api/v10/guilds/guild-role-delete-slice-1/bans/actor-role-delete-burst-1'),
     );
     expect(punishmentCalls).toHaveLength(1);
   });

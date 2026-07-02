@@ -21,7 +21,9 @@ import {
 } from './discord/detection-plugin-framework';
 import { UnauthorizedBotAddDetector } from './discord/unauthorized-bot-add-detector';
 import { UnauthorizedWebhookCreateDetector } from './discord/unauthorized-webhook-create-detector';
+import { UnauthorizedChannelCreateDetector } from './discord/unauthorized-channel-create-detector';
 import { UnauthorizedChannelDeleteDetector } from './discord/unauthorized-channel-delete-detector';
+import { UnauthorizedRoleDeleteDetector } from './discord/unauthorized-role-delete-detector';
 import { DangerousRoleGrantDetector } from './discord/dangerous-role-grant-detector';
 import {
   InMemorySecurityContextBuilder,
@@ -100,7 +102,9 @@ enum EnterpriseOperationalScenario {
   DANGEROUS_WEBHOOK_CREATION = 'DANGEROUS_WEBHOOK_CREATION',
   WEBHOOK_MODIFICATION = 'WEBHOOK_MODIFICATION',
   DANGEROUS_ROLE_GRANT = 'DANGEROUS_ROLE_GRANT',
+  UNAUTHORIZED_ROLE_DELETION = 'UNAUTHORIZED_ROLE_DELETION',
   PRIVILEGED_PERMISSION_ESCALATION = 'PRIVILEGED_PERMISSION_ESCALATION',
+  UNAUTHORIZED_CHANNEL_CREATION = 'UNAUTHORIZED_CHANNEL_CREATION',
   CHANNEL_PERMISSION_DRIFT = 'CHANNEL_PERMISSION_DRIFT',
   STARTUP_RECONCILIATION_AFTER_DOWNTIME = 'STARTUP_RECONCILIATION_AFTER_DOWNTIME',
   RECOVERY_RESTORATION = 'RECOVERY_RESTORATION',
@@ -222,10 +226,22 @@ function resolveEnterpriseScenarioContract(
           actionType: PolicyActionType.ROLE_CREATE,
           supportedByCanonicalDetectorPath: true,
         });
+      case EnterpriseOperationalScenario.UNAUTHORIZED_ROLE_DELETION:
+        return Object.freeze({
+          scenario: override,
+          actionType: PolicyActionType.ROLE_DELETE,
+          supportedByCanonicalDetectorPath: true,
+        });
       case EnterpriseOperationalScenario.PRIVILEGED_PERMISSION_ESCALATION:
         return Object.freeze({
           scenario: override,
           actionType: PolicyActionType.ROLE_CREATE,
+          supportedByCanonicalDetectorPath: true,
+        });
+      case EnterpriseOperationalScenario.UNAUTHORIZED_CHANNEL_CREATION:
+        return Object.freeze({
+          scenario: override,
+          actionType: PolicyActionType.CHANNEL_CREATE,
           supportedByCanonicalDetectorPath: true,
         });
       case EnterpriseOperationalScenario.CHANNEL_PERMISSION_DRIFT:
@@ -295,10 +311,23 @@ function resolveEnterpriseScenarioContract(
         actionType: PolicyActionType.ROLE_CREATE,
         supportedByCanonicalDetectorPath: true,
       });
+    case 'ROLE_DELETE':
+    case 'GUILD_ROLE_DELETE':
+      return Object.freeze({
+        scenario: EnterpriseOperationalScenario.UNAUTHORIZED_ROLE_DELETION,
+        actionType: PolicyActionType.ROLE_DELETE,
+        supportedByCanonicalDetectorPath: true,
+      });
     case 'PRIVILEGED_PERMISSION_ESCALATION':
       return Object.freeze({
         scenario: EnterpriseOperationalScenario.PRIVILEGED_PERMISSION_ESCALATION,
         actionType: PolicyActionType.ROLE_CREATE,
+        supportedByCanonicalDetectorPath: true,
+      });
+    case 'CHANNEL_CREATE':
+      return Object.freeze({
+        scenario: EnterpriseOperationalScenario.UNAUTHORIZED_CHANNEL_CREATION,
+        actionType: PolicyActionType.CHANNEL_CREATE,
         supportedByCanonicalDetectorPath: true,
       });
     case 'CHANNEL_PERMISSION_DRIFT':
@@ -380,6 +409,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private static readonly REPLAY_SUPPRESSION_PRUNE_INTERVAL = 128;
   private static readonly CHANNEL_INCIDENT_PUNISHMENT_WINDOW_MS = 60_000;
   private static readonly CHANNEL_INCIDENT_MAX_ENTRIES = 10_000;
+  private static readonly ROLE_INCIDENT_PUNISHMENT_WINDOW_MS = 60_000;
+  private static readonly ROLE_INCIDENT_MAX_ENTRIES = 10_000;
 
   private readonly logger: Logger;
   private readonly eventPipeline: DiscordEventPipeline;
@@ -401,8 +432,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private readonly runtimeAuthorizedIntegrationIds: readonly string[];
   private readonly runtimeAuthorizedChannelIds: readonly string[];
   private readonly runtimeTrustedChannelAdminIds: readonly string[];
+  private readonly runtimeAuthorizedRoleIds: readonly string[];
+  private readonly runtimeTrustedRoleAdminIds: readonly string[];
   private readonly processedContainmentKeys = new Map<string, number>();
   private readonly processedChannelPunishmentKeys = new Map<string, number>();
+  private readonly processedRolePunishmentKeys = new Map<string, number>();
   private replaySuppressionEventsSincePrune = 0;
   private unsubscribeEventHandler?: () => void;
 
@@ -424,6 +458,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.runtimeAuthorizedIntegrationIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_INTEGRATION_IDS');
     this.runtimeAuthorizedChannelIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_CHANNEL_IDS');
     this.runtimeTrustedChannelAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_CHANNEL_ADMIN_IDS');
+    this.runtimeAuthorizedRoleIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_ROLE_IDS');
+    this.runtimeTrustedRoleAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_ROLE_ADMIN_IDS');
     this.eventPipeline = new InMemoryDiscordEventPipeline(
       eventBus,
       healthService,
@@ -546,6 +582,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           }),
           Object.freeze({
             actionType: PolicyActionType.ROLE_CREATE,
+            enabled: true,
+            threshold: 0,
+            windowMs: 60_000,
+            decisionOnViolation: SecurityDecision.BLOCK,
+          }),
+          Object.freeze({
+            actionType: PolicyActionType.ROLE_DELETE,
             enabled: true,
             threshold: 0,
             windowMs: 60_000,
@@ -692,6 +735,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       'dangerous_role_id',
       'targetRoleId',
       'target_role_id',
+      'targetId',
+      'target_id',
+      'resourceId',
+      'resource_id',
     );
     if (direct) {
       return direct;
@@ -801,6 +848,29 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     return Object.freeze({
       punishActor,
+    });
+  }
+
+  private readRoleDeletionContainmentPolicy(payload: unknown): {
+    readonly punishActor: boolean;
+    readonly containmentRequired: boolean;
+  } {
+    const record = this.readRecord(payload);
+    const policy = this.readRecord(record?.policy);
+
+    const punishActor =
+      this.readBoolean(policy, 'punishActor', 'punish_actor') ??
+      this.readBoolean(record, 'policyRoleDeletePunishActor', 'policy_role_delete_punish_actor') ??
+      this.readBoolean(record, 'policyPunishActor', 'policy_punish_actor') ??
+      true;
+    const containmentRequired =
+      this.readBoolean(policy, 'containmentRequired', 'containment_required') ??
+      this.readBoolean(record, 'roleDeletionContainmentRequired', 'role_deletion_containment_required') ??
+      true;
+
+    return Object.freeze({
+      punishActor,
+      containmentRequired,
     });
   }
 
@@ -1087,6 +1157,18 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return Object.freeze([...new Set([...this.runtimeTrustedChannelAdminIds, ...this.trustedInviterIds, ...inline])]);
   }
 
+  private resolveAuthorizedRoleIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedRoleIds');
+    return Object.freeze([...new Set([...this.runtimeAuthorizedRoleIds, ...inline])]);
+  }
+
+  private resolveTrustedRoleAdminIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'trustedRoleAdminIds');
+    return Object.freeze([...new Set([...this.runtimeTrustedRoleAdminIds, ...this.trustedInviterIds, ...inline])]);
+  }
+
   private buildReplaySuppressionKey(
     event: DiscordGatewayNormalizedEvent,
     actionType: PolicyActionType,
@@ -1103,6 +1185,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     if (actionType === PolicyActionType.ROLE_CREATE && memberUserId && roleId) {
       return ['role-grant', this.guildId, memberUserId, roleId, actorId].join(':');
+    }
+
+    if (actionType === PolicyActionType.ROLE_DELETE && roleId) {
+      return ['role-delete', this.guildId, roleId, actorId].join(':');
     }
 
     if (actionType === PolicyActionType.WEBHOOK_CREATE && webhookId) {
@@ -1213,13 +1299,45 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private readUnauthorizedChannelDetectionMetadata(
     detectionResults: readonly DetectionResult[],
   ): {
+    readonly unauthorizedChannelCreation: boolean;
     readonly unauthorizedChannelDeletion: boolean;
     readonly isAuthorizedChannel: boolean;
     readonly isAuthorizedActor: boolean;
     readonly isTrustedActor: boolean;
   } {
-    const detectorResult = detectionResults.find(
+    const createDetectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-channel-create-detector',
+    );
+    const deleteDetectorResult = detectionResults.find(
       (result) => result.detectorId === 'unauthorized-channel-delete-detector',
+    );
+
+    const createMetadata = createDetectorResult?.metadata && typeof createDetectorResult.metadata === 'object'
+      ? (createDetectorResult.metadata as Record<string, unknown>)
+      : undefined;
+    const deleteMetadata = deleteDetectorResult?.metadata && typeof deleteDetectorResult.metadata === 'object'
+      ? (deleteDetectorResult.metadata as Record<string, unknown>)
+      : undefined;
+
+    return Object.freeze({
+      unauthorizedChannelCreation: createDetectorResult?.matched === true,
+      unauthorizedChannelDeletion: deleteDetectorResult?.matched === true,
+      isAuthorizedChannel: createMetadata?.isAuthorizedChannel === true || deleteMetadata?.isAuthorizedChannel === true,
+      isAuthorizedActor: createMetadata?.isAuthorizedActor === true || deleteMetadata?.isAuthorizedActor === true,
+      isTrustedActor: createMetadata?.isTrustedActor === true || deleteMetadata?.isTrustedActor === true,
+    });
+  }
+
+  private readUnauthorizedRoleDeletionDetectionMetadata(
+    detectionResults: readonly DetectionResult[],
+  ): {
+    readonly unauthorizedRoleDeletion: boolean;
+    readonly isAuthorizedRole: boolean;
+    readonly isAuthorizedActor: boolean;
+    readonly isTrustedActor: boolean;
+  } {
+    const detectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-role-delete-detector',
     );
 
     const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
@@ -1227,8 +1345,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       : undefined;
 
     return Object.freeze({
-      unauthorizedChannelDeletion: detectorResult?.matched === true,
-      isAuthorizedChannel: metadata?.isAuthorizedChannel === true,
+      unauthorizedRoleDeletion: detectorResult?.matched === true,
+      isAuthorizedRole: metadata?.isAuthorizedRole === true,
       isAuthorizedActor: metadata?.isAuthorizedActor === true,
       isTrustedActor: metadata?.isTrustedActor === true,
     });
@@ -1270,6 +1388,42 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return false;
   }
 
+  private pruneRolePunishmentSuppressionKeys(nowMs: number): void {
+    for (const [key, expiresAtMs] of this.processedRolePunishmentKeys.entries()) {
+      if (expiresAtMs <= nowMs) {
+        this.processedRolePunishmentKeys.delete(key);
+      }
+    }
+
+    while (this.processedRolePunishmentKeys.size > IntegratedCanonicalGuardianRuntime.ROLE_INCIDENT_MAX_ENTRIES) {
+      const oldestKey = this.processedRolePunishmentKeys.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+
+      this.processedRolePunishmentKeys.delete(oldestKey);
+    }
+  }
+
+  private shouldSuppressRoleActorPunishment(actorId: string, nowMs: number): boolean {
+    if (!actorId || actorId === 'unknown-actor') {
+      return true;
+    }
+
+    this.pruneRolePunishmentSuppressionKeys(nowMs);
+    const key = `${this.guildId}:${actorId}`;
+    const expiresAtMs = this.processedRolePunishmentKeys.get(key);
+    if (expiresAtMs && expiresAtMs > nowMs) {
+      return true;
+    }
+
+    this.processedRolePunishmentKeys.set(
+      key,
+      nowMs + IntegratedCanonicalGuardianRuntime.ROLE_INCIDENT_PUNISHMENT_WINDOW_MS,
+    );
+    return false;
+  }
+
   private readAuditActionType(value: unknown): AuditActionType | undefined {
     if (typeof value !== 'string') {
       return undefined;
@@ -1294,6 +1448,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           return AuditActionType.BOT_ADD;
         case PolicyActionType.ROLE_CREATE:
           return AuditActionType.ROLE_CREATE;
+        case PolicyActionType.ROLE_DELETE:
+          return AuditActionType.ROLE_DELETE;
         case PolicyActionType.WEBHOOK_CREATE:
           return AuditActionType.WEBHOOK_CREATE;
         case PolicyActionType.WEBHOOK_DELETE:
@@ -1355,14 +1511,24 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     unauthorizedWebhookDetected: boolean,
     isAuthorizedWebhook: boolean,
     isAuthorizedIntegration: boolean,
+    unauthorizedChannelCreation: boolean,
     unauthorizedChannelDeletion: boolean,
     isAuthorizedChannel: boolean,
     isAuthorizedActor: boolean,
     isTrustedChannelActor: boolean,
+    unauthorizedRoleDeletion: boolean,
+    isAuthorizedRole: boolean,
+    isAuthorizedRoleActor: boolean,
+    isTrustedRoleActor: boolean,
+    roleDeletionContainmentPolicy: {
+      readonly punishActor: boolean;
+      readonly containmentRequired: boolean;
+    },
     channelContainmentPolicy: {
       readonly punishActor: boolean;
       readonly containmentRequired: boolean;
     },
+    rolePunishmentSuppressed: boolean,
     channelPunishmentSuppressed: boolean,
   ) {
     const metadata =
@@ -1396,13 +1562,22 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         webhookContainmentRequired: unauthorizedWebhookDetected,
         webhookPolicyViolation: unauthorizedWebhookDetected,
         policyWebhookPunishActor: webhookContainmentPolicy.punishActor,
+        unauthorizedChannelCreation,
         unauthorizedChannelDeletion,
-        channelContainmentRequired: channelContainmentPolicy.containmentRequired && unauthorizedChannelDeletion,
-        channelPolicyViolation: unauthorizedChannelDeletion,
+        channelContainmentRequired:
+          channelContainmentPolicy.containmentRequired && (unauthorizedChannelCreation || unauthorizedChannelDeletion),
+        channelPolicyViolation: unauthorizedChannelCreation || unauthorizedChannelDeletion,
         isAuthorizedChannel,
         isAuthorizedActor,
         isTrustedChannelActor,
         policyChannelPunishActor: channelContainmentPolicy.punishActor && !channelPunishmentSuppressed,
+        unauthorizedRoleDeletion,
+        roleDeletionContainmentRequired: roleDeletionContainmentPolicy.containmentRequired && unauthorizedRoleDeletion,
+        roleDeletionPolicyViolation: unauthorizedRoleDeletion,
+        isAuthorizedRole,
+        isAuthorizedRoleActor,
+        isTrustedRoleActor,
+        policyRoleDeletePunishActor: roleDeletionContainmentPolicy.punishActor && !rolePunishmentSuppressed,
         policyPunishActor: roleContainmentPolicy.punishActor,
         policyNeutralizeTarget: roleContainmentPolicy.neutralizeTarget,
         protectedRole: roleContainmentPolicy.protectedRole,
@@ -1410,10 +1585,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           punishActor: roleContainmentPolicy.punishActor,
           neutralizeTarget: roleContainmentPolicy.neutralizeTarget,
           protectedRole: roleContainmentPolicy.protectedRole,
+          roleDeletePunishActor: roleDeletionContainmentPolicy.punishActor && !rolePunishmentSuppressed,
+          roleDeletionContainmentRequired:
+            roleDeletionContainmentPolicy.containmentRequired && unauthorizedRoleDeletion,
           webhookPunishActor: webhookContainmentPolicy.punishActor,
           channelPunishActor: channelContainmentPolicy.punishActor && !channelPunishmentSuppressed,
           channelContainmentRequired:
-            channelContainmentPolicy.containmentRequired && unauthorizedChannelDeletion,
+            channelContainmentPolicy.containmentRequired && (unauthorizedChannelCreation || unauthorizedChannelDeletion),
         }),
       }),
     });
@@ -1422,7 +1600,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private registerProductionDetectors(): void {
     this.detectorRegistry.register(new UnauthorizedBotAddDetector());
     this.detectorRegistry.register(new UnauthorizedWebhookCreateDetector());
+    this.detectorRegistry.register(new UnauthorizedChannelCreateDetector());
     this.detectorRegistry.register(new UnauthorizedChannelDeleteDetector());
+    this.detectorRegistry.register(new UnauthorizedRoleDeleteDetector());
     this.detectorRegistry.register(new DangerousRoleGrantDetectorPluginAdapter());
     this.detectorRegistry.register(
       new ScenarioContractDetectorPlugin(
@@ -1506,6 +1686,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       case 'GUILD_ROLE_UPDATE':
       case 'MEMBER_ROLE_ADD':
         return PolicyActionType.ROLE_CREATE;
+      case 'ROLE_DELETE':
+      case 'GUILD_ROLE_DELETE':
+        return PolicyActionType.ROLE_DELETE;
       case 'WEBHOOK_CREATE':
         return PolicyActionType.WEBHOOK_CREATE;
       case 'WEBHOOK_DELETE':
@@ -1559,6 +1742,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const memberUserId = this.readMemberUserId(event.payload);
     const roleId = this.readRoleId(event.payload);
     const roleContainmentPolicy = this.readRoleContainmentPolicy(event.payload);
+    const roleDeletionContainmentPolicy = this.readRoleDeletionContainmentPolicy(event.payload);
     const webhookContainmentPolicy = this.readWebhookContainmentPolicy(event.payload);
     const channelContainmentPolicy = this.readChannelContainmentPolicy(event.payload);
     const botAddEvent = this.isBotAddEvent(event.eventName, event.payload);
@@ -1609,6 +1793,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const authorizedIntegrationIds = this.resolveAuthorizedIntegrationIds(event.payload);
     const authorizedChannelIds = this.resolveAuthorizedChannelIds(event.payload);
     const trustedChannelAdminIds = this.resolveTrustedChannelAdminIds(event.payload);
+    const authorizedRoleIds = this.resolveAuthorizedRoleIds(event.payload);
+    const trustedRoleAdminIds = this.resolveTrustedRoleAdminIds(event.payload);
     this.stageAuditLogEntries(event, actionType);
     const detectionResults = await this.detectionEngine.evaluate(
       Object.freeze({
@@ -1645,6 +1831,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
             authorizedChannelIds,
             authorizedActorIds: trustedChannelAdminIds,
             trustedActorIds: trustedChannelAdminIds,
+          }),
+          authorizedRoleIds,
+          roleAuthorization: Object.freeze({
+            authorizedRoleIds,
+            authorizedActorIds: trustedRoleAdminIds,
+            trustedActorIds: trustedRoleAdminIds,
           }),
         }),
       }),
@@ -1709,6 +1901,24 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     }
 
     if (
+      actionType === PolicyActionType.CHANNEL_CREATE &&
+      !effectiveDetectionResults.some(
+        (result) => result.detectorId === 'unauthorized-channel-create-detector' && result.matched,
+      )
+    ) {
+      this.logger.info('Canonical Guardian channel creation containment not required', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        actorId,
+        channelId,
+      });
+      return;
+    }
+
+    if (
       actionType === PolicyActionType.CHANNEL_DELETE &&
       !effectiveDetectionResults.some(
         (result) => result.detectorId === 'unauthorized-channel-delete-detector' && result.matched,
@@ -1726,6 +1936,24 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       return;
     }
 
+    if (
+      actionType === PolicyActionType.ROLE_DELETE &&
+      !effectiveDetectionResults.some(
+        (result) => result.detectorId === 'unauthorized-role-delete-detector' && result.matched,
+      )
+    ) {
+      this.logger.info('Canonical Guardian role deletion containment not required', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        actorId,
+        roleId,
+      });
+      return;
+    }
+
     this.securityEvaluationPipeline.stageDetectionResults(effectiveDetectionResults);
     const decision = await this.securityEvaluationPipeline.evaluate(event, actorId, actionType);
     const effectiveActorId =
@@ -1735,8 +1963,14 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const botDetectionMetadata = this.readUnauthorizedBotDetectionMetadata(effectiveDetectionResults);
     const webhookDetectionMetadata = this.readUnauthorizedWebhookDetectionMetadata(effectiveDetectionResults);
     const channelDetectionMetadata = this.readUnauthorizedChannelDetectionMetadata(effectiveDetectionResults);
+    const roleDeletionDetectionMetadata = this.readUnauthorizedRoleDeletionDetectionMetadata(effectiveDetectionResults);
+    const rolePunishmentSuppressed =
+      actionType === PolicyActionType.ROLE_DELETE && roleDeletionDetectionMetadata.unauthorizedRoleDeletion
+        ? this.shouldSuppressRoleActorPunishment(effectiveActorId, nowMs)
+        : false;
     const channelPunishmentSuppressed =
-      actionType === PolicyActionType.CHANNEL_DELETE && channelDetectionMetadata.unauthorizedChannelDeletion
+      ((actionType === PolicyActionType.CHANNEL_CREATE && channelDetectionMetadata.unauthorizedChannelCreation) ||
+        (actionType === PolicyActionType.CHANNEL_DELETE && channelDetectionMetadata.unauthorizedChannelDeletion))
         ? this.shouldSuppressChannelActorPunishment(effectiveActorId, nowMs)
         : false;
     const effectiveRoleContainmentPolicy = this.mergeRoleContainmentPolicyFromDetections(
@@ -1760,11 +1994,18 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       webhookDetectionMetadata.unauthorizedWebhookDetected,
       webhookDetectionMetadata.isAuthorizedWebhook,
       webhookDetectionMetadata.isAuthorizedIntegration,
+      channelDetectionMetadata.unauthorizedChannelCreation,
       channelDetectionMetadata.unauthorizedChannelDeletion,
       channelDetectionMetadata.isAuthorizedChannel,
       channelDetectionMetadata.isAuthorizedActor,
       channelDetectionMetadata.isTrustedActor,
+      roleDeletionDetectionMetadata.unauthorizedRoleDeletion,
+      roleDeletionDetectionMetadata.isAuthorizedRole,
+      roleDeletionDetectionMetadata.isAuthorizedActor,
+      roleDeletionDetectionMetadata.isTrustedActor,
+      roleDeletionContainmentPolicy,
       channelContainmentPolicy,
+      rolePunishmentSuppressed,
       channelPunishmentSuppressed,
     );
 

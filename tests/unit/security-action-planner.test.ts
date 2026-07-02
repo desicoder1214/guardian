@@ -144,6 +144,34 @@ test('BLOCK plans bot removal, webhook freeze, and audit actions', () => {
   expect(plan.metadata?.threatAssessment?.severity).toBe(DetectionSeverity.CRITICAL);
 });
 
+test('BLOCK on CHANNEL_CREATE plans lock, actor punishment, and audit actions', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.CHANNEL_CREATE,
+    metadata: {
+      source: 'test',
+      actorId: 'actor-channel-create-1',
+      channelContainmentRequired: true,
+      policy: {
+        punishActor: true,
+      },
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([
+    SecurityActionType.LOCK_CHANNELS,
+    SecurityActionType.QUARANTINE_ACTOR,
+    SecurityActionType.CREATE_INCIDENT,
+    SecurityActionType.NOTIFY_AUDIT,
+  ]);
+});
+
 test('BLOCK on ROLE_CREATE plans dangerous role containment and policy-driven actions', () => {
   const planner = new InMemorySecurityActionPlanner();
   const plan = planner.plan({

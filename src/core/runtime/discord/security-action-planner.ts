@@ -196,14 +196,131 @@ function resolveChannelDeletionContainmentActions(metadata: unknown): readonly S
   return Object.freeze(actions);
 }
 
+function resolveChannelCreationContainmentActions(metadata: unknown): readonly SecurityActionType[] {
+  const metadataRecord = readRecord(metadata);
+  const policyRecord = readRecord(metadataRecord?.policy);
+
+  const containmentRequired = readBoolean(
+    metadataRecord,
+    'channelContainmentRequired',
+    'channel_containment_required',
+  ) ?? true;
+  const punishActor = readBoolean(
+    metadataRecord,
+    'policyChannelPunishActor',
+    'policy_channel_punish_actor',
+  ) ?? readBoolean(
+    policyRecord,
+    'punishActor',
+    'punish_actor',
+  ) ?? true;
+  const actorId =
+    (typeof metadataRecord?.actorId === 'string' && metadataRecord.actorId.length > 0
+      ? metadataRecord.actorId
+      : undefined) ?? 'unknown-actor';
+  const punishableActor = actorId !== 'unknown-actor';
+
+  if (!containmentRequired) {
+    return Object.freeze([SecurityActionType.NONE]);
+  }
+
+  const actions: SecurityActionType[] = [SecurityActionType.LOCK_CHANNELS];
+
+  if (punishActor && punishableActor) {
+    actions.push(SecurityActionType.QUARANTINE_ACTOR);
+  }
+
+  actions.push(SecurityActionType.CREATE_INCIDENT, SecurityActionType.NOTIFY_AUDIT);
+
+  return Object.freeze(actions);
+}
+
 function shouldApplyChannelDeletionContainment(metadata: unknown): boolean {
   const metadataRecord = readRecord(metadata);
 
   return (
     readBoolean(metadataRecord, 'channelContainmentRequired', 'channel_containment_required') === true ||
+    readBoolean(metadataRecord, 'unauthorizedChannelCreation', 'unauthorized_channel_creation') === true ||
     readBoolean(metadataRecord, 'unauthorizedChannelDeletion', 'unauthorized_channel_deletion') === true ||
     readBoolean(metadataRecord, 'channelPolicyViolation', 'channel_policy_violation') === true ||
     (typeof metadataRecord?.channelId === 'string' && metadataRecord.channelId.length > 0)
+  );
+}
+
+function shouldApplyChannelCreationContainment(metadata: unknown): boolean {
+  const metadataRecord = readRecord(metadata);
+
+  return (
+    readBoolean(metadataRecord, 'channelContainmentRequired', 'channel_containment_required') === true ||
+    readBoolean(metadataRecord, 'unauthorizedChannelCreation', 'unauthorized_channel_creation') === true ||
+    readBoolean(metadataRecord, 'channelPolicyViolation', 'channel_policy_violation') === true ||
+    (typeof metadataRecord?.channelId === 'string' && metadataRecord.channelId.length > 0)
+  );
+}
+
+function resolveRoleDeletionContainmentActions(metadata: unknown): readonly SecurityActionType[] {
+  const metadataRecord = readRecord(metadata);
+  const policyRecord = readRecord(metadataRecord?.policy);
+
+  const containmentRequired = readBoolean(
+    metadataRecord,
+    'roleDeletionContainmentRequired',
+    'role_deletion_containment_required',
+  ) ?? true;
+  const punishActor = readBoolean(
+    metadataRecord,
+    'policyRoleDeletePunishActor',
+    'policy_role_delete_punish_actor',
+  ) ?? readBoolean(
+    policyRecord,
+    'roleDeletePunishActor',
+    'role_delete_punish_actor',
+  ) ?? readBoolean(
+    policyRecord,
+    'punishActor',
+    'punish_actor',
+  ) ?? true;
+  const actorId =
+    (typeof metadataRecord?.actorId === 'string' && metadataRecord.actorId.length > 0
+      ? metadataRecord.actorId
+      : undefined) ?? 'unknown-actor';
+  const punishableActor = actorId !== 'unknown-actor';
+  const memberUserId =
+    typeof metadataRecord?.memberUserId === 'string' && metadataRecord.memberUserId.length > 0
+      ? metadataRecord.memberUserId
+      : undefined;
+  const roleId =
+    typeof metadataRecord?.roleId === 'string' && metadataRecord.roleId.length > 0
+      ? metadataRecord.roleId
+      : undefined;
+
+  if (!containmentRequired) {
+    return Object.freeze([SecurityActionType.NONE]);
+  }
+
+  const actions: SecurityActionType[] = [];
+
+  if (memberUserId && roleId) {
+    actions.push(SecurityActionType.REMOVE_DANGEROUS_ROLE);
+  }
+
+  if (punishActor && punishableActor) {
+    actions.push(SecurityActionType.QUARANTINE_ACTOR);
+  }
+
+  actions.push(SecurityActionType.CREATE_INCIDENT, SecurityActionType.NOTIFY_AUDIT);
+
+  return Object.freeze(actions);
+}
+
+function shouldApplyRoleDeletionContainment(metadata: unknown): boolean {
+  const metadataRecord = readRecord(metadata);
+
+  return (
+    readBoolean(metadataRecord, 'roleDeletionContainmentRequired', 'role_deletion_containment_required') === true ||
+    readBoolean(metadataRecord, 'unauthorizedRoleDeletion', 'unauthorized_role_deletion') === true ||
+    readBoolean(metadataRecord, 'roleDeletionPolicyViolation', 'role_deletion_policy_violation') === true ||
+    (typeof metadataRecord?.roleId === 'string' && metadataRecord.roleId.length > 0)
   );
 }
 
@@ -233,9 +350,17 @@ export class InMemorySecurityActionPlanner implements SecurityActionPlanner {
         : decisionModel.decision === SecurityDecision.BLOCK && decisionModel.actionType === 'WEBHOOK_CREATE'
           ? resolveWebhookContainmentActions(decisionModel.metadata)
           : decisionModel.decision === SecurityDecision.BLOCK &&
+              decisionModel.actionType === 'CHANNEL_CREATE' &&
+              shouldApplyChannelCreationContainment(decisionModel.metadata)
+            ? resolveChannelCreationContainmentActions(decisionModel.metadata)
+          : decisionModel.decision === SecurityDecision.BLOCK &&
               decisionModel.actionType === 'CHANNEL_DELETE' &&
               shouldApplyChannelDeletionContainment(decisionModel.metadata)
             ? resolveChannelDeletionContainmentActions(decisionModel.metadata)
+            : decisionModel.decision === SecurityDecision.BLOCK &&
+                decisionModel.actionType === 'ROLE_DELETE' &&
+                shouldApplyRoleDeletionContainment(decisionModel.metadata)
+              ? resolveRoleDeletionContainmentActions(decisionModel.metadata)
           : actionTypes;
     const uniqueActionTypes = [...new Set(resolvedActionTypes)];
     const threatAssessment = this.readThreatAssessment(decisionModel.metadata);
