@@ -1126,16 +1126,472 @@ describe('IntegratedCanonicalGuardianRuntime webhook creation abuse vertical sli
 
     await runtime.start();
     await runtime.ingestGatewayEvent(
-      buildWebhookCreateEvent({ actorId: 'actor-webhook-1', webhookId: 'webhook-dangerous-1' }),
+      {
+        ...buildWebhookCreateEvent({ actorId: 'actor-webhook-1', webhookId: 'webhook-dangerous-1' }),
+        ts: '2026-07-01T15:01:00.000Z',
+      },
     );
     await runtime.ingestGatewayEvent(
-      buildWebhookCreateEvent({ actorId: 'actor-webhook-2', webhookId: 'webhook-dangerous-2' }),
+      {
+        ...buildWebhookCreateEvent({ actorId: 'actor-webhook-2', webhookId: 'webhook-dangerous-2' }),
+        ts: '2026-07-01T15:01:01.000Z',
+      },
     );
+    await new Promise<void>((resolve) => setImmediate(resolve));
     await runtime.stop();
 
     const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
     expect(urls.some((url) => url.includes('/api/v10/webhooks/webhook-dangerous-1'))).toBe(true);
     expect(urls.some((url) => url.includes('/api/v10/webhooks/webhook-dangerous-2'))).toBe(true);
+  });
+});
+
+describe('IntegratedCanonicalGuardianRuntime channel deletion abuse vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_AUTHORIZED_CHANNEL_IDS;
+    delete process.env.GUARDIAN_TRUSTED_CHANNEL_ADMIN_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildChannelDeleteEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      t: 'CHANNEL_DELETE',
+      d: {
+        guildId: 'guild-channel-slice-1',
+        actorId: 'actor-channel-slice-1',
+        channelId: 'channel-dangerous-slice-1',
+        targetId: 'channel-dangerous-slice-1',
+        overwriteId: 'overwrite-channel-slice-1',
+        ...overrides,
+      },
+      ts: '2026-07-01T17:00:00.000Z',
+    };
+  }
+
+  test('unauthorized channel deletion executes channel containment and actor punishment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-slice-1',
+      'guild-channel-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildChannelDeleteEvent());
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/channels/channel-dangerous-slice-1'))).toBe(true);
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-channel-slice-1/members/actor-channel-slice-1') ||
+          url.includes('/api/v10/guilds/guild-channel-slice-1/bans/actor-channel-slice-1'),
+      ),
+    ).toBe(true);
+  });
+
+  test('normal administrative deletion performs no containment', async () => {
+    process.env.GUARDIAN_AUTHORIZED_CHANNEL_IDS = 'channel-safe-admin-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-slice-2',
+      'guild-channel-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildChannelDeleteEvent({
+        channelId: 'channel-safe-admin-1',
+        targetId: 'channel-safe-admin-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('trusted administrator policy is respected for channel deletion', async () => {
+    process.env.GUARDIAN_TRUSTED_CHANNEL_ADMIN_IDS = 'trusted-channel-admin-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-slice-3',
+      'guild-channel-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildChannelDeleteEvent({
+        actorId: 'trusted-channel-admin-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('duplicate/replay channel deletion events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-slice-4',
+      'guild-channel-slice-1',
+    );
+
+    const replayEvent = buildChannelDeleteEvent({
+      actorId: 'actor-channel-replay-1',
+      channelId: 'channel-dangerous-replay-1',
+      targetId: 'channel-dangerous-replay-1',
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    const channelCalls = fetchSpy.mock.calls.filter((call) =>
+      String((call as unknown[])[0] ?? '').includes('/api/v10/channels/channel-dangerous-replay-1'),
+    );
+    const punishmentCalls = fetchSpy.mock.calls.filter((call) => {
+      const url = String((call as unknown[])[0] ?? '');
+      return (
+        url.includes('/api/v10/guilds/guild-channel-slice-1/members/actor-channel-replay-1') ||
+        url.includes('/api/v10/guilds/guild-channel-slice-1/bans/actor-channel-replay-1')
+      );
+    });
+    expect(channelCalls).toHaveLength(1);
+    expect(punishmentCalls).toHaveLength(1);
+    expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
+  });
+
+  test('missing audit log still performs mandatory containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-slice-5',
+      'guild-channel-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildChannelDeleteEvent({
+        actorId: 'actor-no-audit-1',
+      }),
+    );
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/channels/channel-dangerous-slice-1'))).toBe(true);
+  });
+
+  test('late audit attribution still allows actor punishment on later deletion', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-slice-6',
+      'guild-channel-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildChannelDeleteEvent({
+        actorId: 'unknown-actor',
+        channelId: 'channel-late-audit-1',
+        targetId: 'channel-late-audit-1',
+      }),
+    );
+    await runtime.ingestGatewayEvent(
+      buildChannelDeleteEvent({
+        actorId: 'unknown-actor',
+        channelId: 'channel-late-audit-2',
+        targetId: 'channel-late-audit-2',
+        auditLogEntry: {
+          id: 'audit-channel-late-1',
+          actionType: 'CHANNEL_DELETE',
+          actorId: 'actor-late-audit-1',
+          targetId: 'channel-late-audit-2',
+          resourceId: 'channel-late-audit-2',
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-channel-slice-1/members/actor-late-audit-1') ||
+          url.includes('/api/v10/guilds/guild-channel-slice-1/bans/actor-late-audit-1'),
+      ),
+    ).toBe(true);
+  });
+
+  test.each([403, 429, 500])('channel containment failure (%i) triggers recovery scheduling', async (statusCode) => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/api/v10/channels/')) {
+        return createFetchResponse(statusCode);
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      `runtime-channel-slice-fail-${statusCode}`,
+      'guild-channel-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildChannelDeleteEvent({
+        actorId: `actor-channel-fail-${statusCode}`,
+        channelId: `channel-dangerous-fail-${statusCode}`,
+        targetId: `channel-dangerous-fail-${statusCode}`,
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).toHaveBeenCalled();
+  });
+
+  test('channel containment 404 fails closed and triggers recovery scheduling', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/api/v10/channels/')) {
+        return {
+          ...createFetchResponse(404),
+          json: async () => Object.freeze({ code: 'UNKNOWN_CHANNEL', message: 'Unknown Channel' }),
+        };
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-slice-404',
+      'guild-channel-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildChannelDeleteEvent({
+        actorId: 'actor-channel-404',
+        channelId: 'channel-dangerous-404',
+        targetId: 'channel-dangerous-404',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).toHaveBeenCalled();
+  });
+
+  test('partial recovery path is triggered when restore action fails after lock succeeds', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/permissions/')) {
+        return createFetchResponse(500);
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-slice-partial',
+      'guild-channel-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildChannelDeleteEvent({
+        channelId: 'channel-dangerous-partial-1',
+        targetId: 'channel-dangerous-partial-1',
+        overwriteId: 'overwrite-partial-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchSpy.mock.calls.some((call) => String((call as unknown[])[0] ?? '').includes('/api/v10/channels/channel-dangerous-partial-1'))).toBe(true);
+    expect(recoverySpy).toHaveBeenCalled();
+  });
+
+  test('multiple channel deletions in parallel are contained while actor punishment executes once', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-channel-slice-7',
+      'guild-channel-slice-1',
+    );
+
+    await runtime.start();
+    await Promise.all([
+      runtime.ingestGatewayEvent(
+        buildChannelDeleteEvent({
+          actorId: 'actor-channel-burst-1',
+          channelId: 'channel-burst-1',
+          targetId: 'channel-burst-1',
+        }),
+      ),
+      runtime.ingestGatewayEvent(
+        buildChannelDeleteEvent({
+          actorId: 'actor-channel-burst-1',
+          channelId: 'channel-burst-2',
+          targetId: 'channel-burst-2',
+        }),
+      ),
+    ]);
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/channels/channel-burst-1'))).toBe(true);
+    expect(urls.some((url) => url.includes('/api/v10/channels/channel-burst-2'))).toBe(true);
+
+    const punishmentCalls = urls.filter(
+      (url) =>
+        url.includes('/api/v10/guilds/guild-channel-slice-1/members/actor-channel-burst-1') ||
+        url.includes('/api/v10/guilds/guild-channel-slice-1/bans/actor-channel-burst-1'),
+    );
+    expect(punishmentCalls).toHaveLength(1);
   });
 });
 

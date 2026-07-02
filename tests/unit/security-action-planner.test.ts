@@ -116,6 +116,7 @@ test('BLOCK plans bot removal, webhook freeze, and audit actions', () => {
   const planner = new InMemorySecurityActionPlanner();
   const plan = planner.plan({
     ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.BOT_ADD,
     metadata: {
       source: 'test',
       threatAssessment: buildThreatAssessment(
@@ -189,6 +190,35 @@ test('BLOCK on WEBHOOK_CREATE plans mandatory containment and policy-driven puni
 
   expect(plan.actions.map((action) => action.type)).toEqual([
     SecurityActionType.FREEZE_WEBHOOKS,
+    SecurityActionType.QUARANTINE_ACTOR,
+    SecurityActionType.CREATE_INCIDENT,
+    SecurityActionType.NOTIFY_AUDIT,
+  ]);
+});
+
+test('BLOCK on CHANNEL_DELETE plans lock, recovery trigger, and actor punishment once policy allows it', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.CHANNEL_DELETE,
+    metadata: {
+      source: 'test',
+      actorId: 'actor-channel-1',
+      channelContainmentRequired: true,
+      policy: {
+        punishActor: true,
+      },
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([
+    SecurityActionType.LOCK_CHANNELS,
+    SecurityActionType.RESTORE_RESOURCE,
     SecurityActionType.QUARANTINE_ACTOR,
     SecurityActionType.CREATE_INCIDENT,
     SecurityActionType.NOTIFY_AUDIT,

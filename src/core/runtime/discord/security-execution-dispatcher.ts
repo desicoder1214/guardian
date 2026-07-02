@@ -174,6 +174,13 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
         'targetWebhookId',
         'target_webhook_id',
       );
+      const channelId = readString(
+        securityDecisionMetadata,
+        'channelId',
+        'channel_id',
+        'targetChannelId',
+        'target_channel_id',
+      );
       const request = freezeRequest({
         route,
         planId: routingResult.planId,
@@ -193,6 +200,7 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
           ...(memberUserId ? { memberUserId } : {}),
           ...(roleId ? { roleId } : {}),
           ...(webhookId ? { webhookId } : {}),
+          ...(channelId ? { channelId } : {}),
           executionPlanId: routingResult.executionPlanId,
           securityDecisionMetadata,
         }),

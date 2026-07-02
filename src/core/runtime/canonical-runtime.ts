@@ -21,6 +21,7 @@ import {
 } from './discord/detection-plugin-framework';
 import { UnauthorizedBotAddDetector } from './discord/unauthorized-bot-add-detector';
 import { UnauthorizedWebhookCreateDetector } from './discord/unauthorized-webhook-create-detector';
+import { UnauthorizedChannelDeleteDetector } from './discord/unauthorized-channel-delete-detector';
 import { DangerousRoleGrantDetector } from './discord/dangerous-role-grant-detector';
 import {
   InMemorySecurityContextBuilder,
@@ -30,6 +31,7 @@ import {
 } from './discord/security-evaluation-pipeline';
 import { InMemoryAuditAttributionEngine } from './discord/audit-attribution-engine';
 import { InMemoryAuditLogProvider } from './discord/audit-log-provider';
+import { AuditActionType, AuditLogEntry } from './discord/audit-attribution-types';
 import {
   InMemorySecurityPolicyEngine,
 } from './discord/policy-engine';
@@ -376,12 +378,15 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private static readonly REPLAY_SUPPRESSION_TTL_MS = 15 * 60_000;
   private static readonly REPLAY_SUPPRESSION_MAX_ENTRIES = 50_000;
   private static readonly REPLAY_SUPPRESSION_PRUNE_INTERVAL = 128;
+  private static readonly CHANNEL_INCIDENT_PUNISHMENT_WINDOW_MS = 60_000;
+  private static readonly CHANNEL_INCIDENT_MAX_ENTRIES = 10_000;
 
   private readonly logger: Logger;
   private readonly eventPipeline: DiscordEventPipeline;
   private readonly detectorRegistry = new InMemoryDetectorPluginRegistry();
   private readonly detectionEngine = new InMemoryDetectionEngine(this.detectorRegistry);
   private readonly policyProvider = new InMemorySecurityPolicyProvider();
+  private readonly auditLogProvider = new InMemoryAuditLogProvider();
   private readonly executionService: DiscordExecutionService;
   private readonly securityEvaluationPipeline: InMemorySecurityEvaluationPipeline;
   private readonly actionPlanner = new InMemorySecurityActionPlanner();
@@ -394,7 +399,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private readonly runtimeTrustedBotIds: readonly string[];
   private readonly runtimeAuthorizedWebhookIds: readonly string[];
   private readonly runtimeAuthorizedIntegrationIds: readonly string[];
+  private readonly runtimeAuthorizedChannelIds: readonly string[];
+  private readonly runtimeTrustedChannelAdminIds: readonly string[];
   private readonly processedContainmentKeys = new Map<string, number>();
+  private readonly processedChannelPunishmentKeys = new Map<string, number>();
   private replaySuppressionEventsSincePrune = 0;
   private unsubscribeEventHandler?: () => void;
 
@@ -414,6 +422,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.runtimeTrustedBotIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_BOT_IDS');
     this.runtimeAuthorizedWebhookIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_WEBHOOK_IDS');
     this.runtimeAuthorizedIntegrationIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_INTEGRATION_IDS');
+    this.runtimeAuthorizedChannelIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_CHANNEL_IDS');
+    this.runtimeTrustedChannelAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_CHANNEL_ADMIN_IDS');
     this.eventPipeline = new InMemoryDiscordEventPipeline(
       eventBus,
       healthService,
@@ -424,7 +434,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.executionService = this.resolveExecutionService();
     this.securityEvaluationPipeline = new InMemorySecurityEvaluationPipeline(
       new InMemorySecurityContextBuilder(),
-      new InMemoryAuditAttributionEngine(new InMemoryAuditLogProvider()),
+      new InMemoryAuditAttributionEngine(this.auditLogProvider),
       new InMemorySecurityPolicyEngine(this.policyProvider, new InMemoryThresholdTracker()),
       new InMemorySecurityDecisionEngine(),
     );
@@ -645,8 +655,6 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       'member_id',
       'targetUserId',
       'target_user_id',
-      'targetId',
-      'target_id',
     );
     if (direct) {
       return direct;
@@ -731,6 +739,27 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return this.readString(webhook, 'id', 'webhookId', 'webhook_id');
   }
 
+  private readChannelId(payload: unknown): string | undefined {
+    const record = this.readRecord(payload);
+    const direct = this.readString(
+      record,
+      'channelId',
+      'channel_id',
+      'targetChannelId',
+      'target_channel_id',
+      'targetId',
+      'target_id',
+      'resourceId',
+      'resource_id',
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const channel = this.readRecord(record?.channel);
+    return this.readString(channel, 'id', 'channelId', 'channel_id');
+  }
+
   private readRoleContainmentPolicy(payload: unknown): {
     readonly punishActor: boolean;
     readonly neutralizeTarget: boolean;
@@ -772,6 +801,29 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     return Object.freeze({
       punishActor,
+    });
+  }
+
+  private readChannelContainmentPolicy(payload: unknown): {
+    readonly punishActor: boolean;
+    readonly containmentRequired: boolean;
+  } {
+    const record = this.readRecord(payload);
+    const policy = this.readRecord(record?.policy);
+
+    const punishActor =
+      this.readBoolean(policy, 'punishActor', 'punish_actor') ??
+      this.readBoolean(record, 'policyChannelPunishActor', 'policy_channel_punish_actor') ??
+      this.readBoolean(record, 'policyPunishActor', 'policy_punish_actor') ??
+      true;
+    const containmentRequired =
+      this.readBoolean(policy, 'containmentRequired', 'containment_required') ??
+      this.readBoolean(record, 'channelContainmentRequired', 'channel_containment_required') ??
+      true;
+
+    return Object.freeze({
+      punishActor,
+      containmentRequired,
     });
   }
 
@@ -1023,6 +1075,18 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return Object.freeze([...new Set([...this.runtimeAuthorizedIntegrationIds, ...inline])]);
   }
 
+  private resolveAuthorizedChannelIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedChannelIds');
+    return Object.freeze([...new Set([...this.runtimeAuthorizedChannelIds, ...inline])]);
+  }
+
+  private resolveTrustedChannelAdminIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'trustedChannelAdminIds');
+    return Object.freeze([...new Set([...this.runtimeTrustedChannelAdminIds, ...this.trustedInviterIds, ...inline])]);
+  }
+
   private buildReplaySuppressionKey(
     event: DiscordGatewayNormalizedEvent,
     actionType: PolicyActionType,
@@ -1031,6 +1095,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     memberUserId: string | undefined,
     roleId: string | undefined,
     webhookId: string | undefined,
+    channelId: string | undefined,
   ): string {
     if (botId) {
       return ['bot-add', this.guildId, botId, actorId].join(':');
@@ -1042,6 +1107,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     if (actionType === PolicyActionType.WEBHOOK_CREATE && webhookId) {
       return ['webhook-create', this.guildId, webhookId, actorId].join(':');
+    }
+
+    if (actionType === PolicyActionType.CHANNEL_DELETE && channelId) {
+      return ['channel-delete', this.guildId, channelId, actorId].join(':');
     }
 
     return ['event', this.guildId, event.eventName, event.correlationId].join(':');
@@ -1141,12 +1210,135 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     });
   }
 
+  private readUnauthorizedChannelDetectionMetadata(
+    detectionResults: readonly DetectionResult[],
+  ): {
+    readonly unauthorizedChannelDeletion: boolean;
+    readonly isAuthorizedChannel: boolean;
+    readonly isAuthorizedActor: boolean;
+    readonly isTrustedActor: boolean;
+  } {
+    const detectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-channel-delete-detector',
+    );
+
+    const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
+      ? (detectorResult.metadata as Record<string, unknown>)
+      : undefined;
+
+    return Object.freeze({
+      unauthorizedChannelDeletion: detectorResult?.matched === true,
+      isAuthorizedChannel: metadata?.isAuthorizedChannel === true,
+      isAuthorizedActor: metadata?.isAuthorizedActor === true,
+      isTrustedActor: metadata?.isTrustedActor === true,
+    });
+  }
+
+  private pruneChannelPunishmentSuppressionKeys(nowMs: number): void {
+    for (const [key, expiresAtMs] of this.processedChannelPunishmentKeys.entries()) {
+      if (expiresAtMs <= nowMs) {
+        this.processedChannelPunishmentKeys.delete(key);
+      }
+    }
+
+    while (this.processedChannelPunishmentKeys.size > IntegratedCanonicalGuardianRuntime.CHANNEL_INCIDENT_MAX_ENTRIES) {
+      const oldestKey = this.processedChannelPunishmentKeys.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+
+      this.processedChannelPunishmentKeys.delete(oldestKey);
+    }
+  }
+
+  private shouldSuppressChannelActorPunishment(actorId: string, nowMs: number): boolean {
+    if (!actorId || actorId === 'unknown-actor') {
+      return true;
+    }
+
+    this.pruneChannelPunishmentSuppressionKeys(nowMs);
+    const key = `${this.guildId}:${actorId}`;
+    const expiresAtMs = this.processedChannelPunishmentKeys.get(key);
+    if (expiresAtMs && expiresAtMs > nowMs) {
+      return true;
+    }
+
+    this.processedChannelPunishmentKeys.set(
+      key,
+      nowMs + IntegratedCanonicalGuardianRuntime.CHANNEL_INCIDENT_PUNISHMENT_WINDOW_MS,
+    );
+    return false;
+  }
+
+  private readAuditActionType(value: unknown): AuditActionType | undefined {
+    if (typeof value !== 'string') {
+      return undefined;
+    }
+
+    const allowed = new Set<string>(Object.values(AuditActionType));
+    if (!allowed.has(value)) {
+      return undefined;
+    }
+
+    return value as AuditActionType;
+  }
+
+  private stageAuditLogEntries(event: DiscordGatewayNormalizedEvent, actionType: PolicyActionType): void {
+    const payload = this.readRecord(event.payload);
+    const candidateEntries = payload?.auditLogEntries;
+    const singleEntry = payload?.auditLogEntry;
+
+    const resolvedActionType = ((): AuditActionType => {
+      switch (actionType) {
+        case PolicyActionType.BOT_ADD:
+          return AuditActionType.BOT_ADD;
+        case PolicyActionType.ROLE_CREATE:
+          return AuditActionType.ROLE_CREATE;
+        case PolicyActionType.WEBHOOK_CREATE:
+          return AuditActionType.WEBHOOK_CREATE;
+        case PolicyActionType.WEBHOOK_DELETE:
+          return AuditActionType.WEBHOOK_DELETE;
+        case PolicyActionType.CHANNEL_DELETE:
+          return AuditActionType.CHANNEL_DELETE;
+        default:
+          return AuditActionType.BOT_ADD;
+      }
+    })();
+
+    const entries = Array.isArray(candidateEntries)
+      ? candidateEntries
+      : singleEntry
+        ? [singleEntry]
+        : [];
+
+    for (const entry of entries) {
+      const record = this.readRecord(entry);
+      if (!record) {
+        continue;
+      }
+
+      const auditEntry: AuditLogEntry = {
+        id: this.readString(record, 'id', 'auditId', 'audit_id') ?? `${event.correlationId}:${Date.now()}`,
+        guildId: this.readString(record, 'guildId', 'guild_id') ?? this.guildId,
+        actorId: this.readString(record, 'actorId', 'actor_id', 'executorId', 'executor_id') ?? 'unknown-actor',
+        targetId: this.readString(record, 'targetId', 'target_id'),
+        actionType: this.readAuditActionType(record.actionType) ?? resolvedActionType,
+        resourceId: this.readString(record, 'resourceId', 'resource_id'),
+        timestamp: this.readString(record, 'timestamp') ?? event.timestamp,
+        metadata: this.readRecord(record.metadata),
+      };
+
+      this.auditLogProvider.record(Object.freeze(auditEntry));
+    }
+  }
+
   private enrichDecisionMetadata(
     decision: SecurityDecisionModel,
     event: DiscordGatewayNormalizedEvent,
     actorId: string,
     botId: string | undefined,
     webhookId: string | undefined,
+    channelId: string | undefined,
     memberUserId: string | undefined,
     roleId: string | undefined,
     roleContainmentPolicy: {
@@ -1163,6 +1355,15 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     unauthorizedWebhookDetected: boolean,
     isAuthorizedWebhook: boolean,
     isAuthorizedIntegration: boolean,
+    unauthorizedChannelDeletion: boolean,
+    isAuthorizedChannel: boolean,
+    isAuthorizedActor: boolean,
+    isTrustedChannelActor: boolean,
+    channelContainmentPolicy: {
+      readonly punishActor: boolean;
+      readonly containmentRequired: boolean;
+    },
+    channelPunishmentSuppressed: boolean,
   ) {
     const metadata =
       decision.metadata && typeof decision.metadata === 'object'
@@ -1180,6 +1381,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         botId,
         botUserId: botId,
         webhookId,
+        channelId,
         memberUserId,
         roleId,
         eventName: event.eventName,
@@ -1194,6 +1396,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         webhookContainmentRequired: unauthorizedWebhookDetected,
         webhookPolicyViolation: unauthorizedWebhookDetected,
         policyWebhookPunishActor: webhookContainmentPolicy.punishActor,
+        unauthorizedChannelDeletion,
+        channelContainmentRequired: channelContainmentPolicy.containmentRequired && unauthorizedChannelDeletion,
+        channelPolicyViolation: unauthorizedChannelDeletion,
+        isAuthorizedChannel,
+        isAuthorizedActor,
+        isTrustedChannelActor,
+        policyChannelPunishActor: channelContainmentPolicy.punishActor && !channelPunishmentSuppressed,
         policyPunishActor: roleContainmentPolicy.punishActor,
         policyNeutralizeTarget: roleContainmentPolicy.neutralizeTarget,
         protectedRole: roleContainmentPolicy.protectedRole,
@@ -1202,6 +1411,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           neutralizeTarget: roleContainmentPolicy.neutralizeTarget,
           protectedRole: roleContainmentPolicy.protectedRole,
           webhookPunishActor: webhookContainmentPolicy.punishActor,
+          channelPunishActor: channelContainmentPolicy.punishActor && !channelPunishmentSuppressed,
+          channelContainmentRequired:
+            channelContainmentPolicy.containmentRequired && unauthorizedChannelDeletion,
         }),
       }),
     });
@@ -1210,6 +1422,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private registerProductionDetectors(): void {
     this.detectorRegistry.register(new UnauthorizedBotAddDetector());
     this.detectorRegistry.register(new UnauthorizedWebhookCreateDetector());
+    this.detectorRegistry.register(new UnauthorizedChannelDeleteDetector());
     this.detectorRegistry.register(new DangerousRoleGrantDetectorPluginAdapter());
     this.detectorRegistry.register(
       new ScenarioContractDetectorPlugin(
@@ -1342,10 +1555,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const actorId = this.readActorId(event.payload);
     const botId = this.readBotId(event.payload);
     const webhookId = this.readWebhookId(event.payload);
+    const channelId = this.readChannelId(event.payload);
     const memberUserId = this.readMemberUserId(event.payload);
     const roleId = this.readRoleId(event.payload);
     const roleContainmentPolicy = this.readRoleContainmentPolicy(event.payload);
     const webhookContainmentPolicy = this.readWebhookContainmentPolicy(event.payload);
+    const channelContainmentPolicy = this.readChannelContainmentPolicy(event.payload);
     const botAddEvent = this.isBotAddEvent(event.eventName, event.payload);
 
     if (event.eventName === 'GUILD_MEMBER_ADD' && !botAddEvent) {
@@ -1374,6 +1589,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       memberUserId,
       roleId,
       webhookId,
+      channelId,
     );
     if (this.hasReplaySuppressionKey(replaySuppressionKey, nowMs)) {
       this.logger.warn('Canonical Guardian replay suppressed', {
@@ -1391,6 +1607,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const trustedBotIds = this.resolveTrustedBotIds(event.payload);
     const authorizedWebhookIds = this.resolveAuthorizedWebhookIds(event.payload);
     const authorizedIntegrationIds = this.resolveAuthorizedIntegrationIds(event.payload);
+    const authorizedChannelIds = this.resolveAuthorizedChannelIds(event.payload);
+    const trustedChannelAdminIds = this.resolveTrustedChannelAdminIds(event.payload);
+    this.stageAuditLogEntries(event, actionType);
     const detectionResults = await this.detectionEngine.evaluate(
       Object.freeze({
         normalizedEvent: event,
@@ -1418,6 +1637,14 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           webhookAuthorization: Object.freeze({
             authorizedWebhookIds,
             authorizedIntegrationIds,
+          }),
+          authorizedChannelIds,
+          authorizedActorIds: trustedChannelAdminIds,
+          trustedActorIds: trustedChannelAdminIds,
+          channelAuthorization: Object.freeze({
+            authorizedChannelIds,
+            authorizedActorIds: trustedChannelAdminIds,
+            trustedActorIds: trustedChannelAdminIds,
           }),
         }),
       }),
@@ -1481,10 +1708,37 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       return;
     }
 
+    if (
+      actionType === PolicyActionType.CHANNEL_DELETE &&
+      !effectiveDetectionResults.some(
+        (result) => result.detectorId === 'unauthorized-channel-delete-detector' && result.matched,
+      )
+    ) {
+      this.logger.info('Canonical Guardian channel deletion containment not required', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        actorId,
+        channelId,
+      });
+      return;
+    }
+
     this.securityEvaluationPipeline.stageDetectionResults(effectiveDetectionResults);
     const decision = await this.securityEvaluationPipeline.evaluate(event, actorId, actionType);
+    const effectiveActorId =
+      typeof decision.actorId === 'string' && decision.actorId.length > 0
+        ? decision.actorId
+        : actorId;
     const botDetectionMetadata = this.readUnauthorizedBotDetectionMetadata(effectiveDetectionResults);
     const webhookDetectionMetadata = this.readUnauthorizedWebhookDetectionMetadata(effectiveDetectionResults);
+    const channelDetectionMetadata = this.readUnauthorizedChannelDetectionMetadata(effectiveDetectionResults);
+    const channelPunishmentSuppressed =
+      actionType === PolicyActionType.CHANNEL_DELETE && channelDetectionMetadata.unauthorizedChannelDeletion
+        ? this.shouldSuppressChannelActorPunishment(effectiveActorId, nowMs)
+        : false;
     const effectiveRoleContainmentPolicy = this.mergeRoleContainmentPolicyFromDetections(
       roleContainmentPolicy,
       effectiveDetectionResults,
@@ -1492,9 +1746,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const enrichedDecision = this.enrichDecisionMetadata(
       decision,
       event,
-      actorId,
+      effectiveActorId,
       botId,
       webhookId,
+      channelId,
       memberUserId,
       roleId,
       effectiveRoleContainmentPolicy,
@@ -1505,6 +1760,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       webhookDetectionMetadata.unauthorizedWebhookDetected,
       webhookDetectionMetadata.isAuthorizedWebhook,
       webhookDetectionMetadata.isAuthorizedIntegration,
+      channelDetectionMetadata.unauthorizedChannelDeletion,
+      channelDetectionMetadata.isAuthorizedChannel,
+      channelDetectionMetadata.isAuthorizedActor,
+      channelDetectionMetadata.isTrustedActor,
+      channelContainmentPolicy,
+      channelPunishmentSuppressed,
     );
 
     const actionPlan = this.actionPlanner.plan(enrichedDecision);

@@ -154,6 +154,59 @@ function resolveWebhookContainmentActions(metadata: unknown): readonly SecurityA
   return Object.freeze(actions);
 }
 
+function resolveChannelDeletionContainmentActions(metadata: unknown): readonly SecurityActionType[] {
+  const metadataRecord = readRecord(metadata);
+  const policyRecord = readRecord(metadataRecord?.policy);
+
+  const containmentRequired = readBoolean(
+    metadataRecord,
+    'channelContainmentRequired',
+    'channel_containment_required',
+  ) ?? true;
+  const punishActor = readBoolean(
+    metadataRecord,
+    'policyChannelPunishActor',
+    'policy_channel_punish_actor',
+  ) ?? readBoolean(
+    policyRecord,
+    'punishActor',
+    'punish_actor',
+  ) ?? true;
+  const actorId =
+    (typeof metadataRecord?.actorId === 'string' && metadataRecord.actorId.length > 0
+      ? metadataRecord.actorId
+      : undefined) ?? 'unknown-actor';
+  const punishableActor = actorId !== 'unknown-actor';
+
+  if (!containmentRequired) {
+    return Object.freeze([SecurityActionType.NONE]);
+  }
+
+  const actions: SecurityActionType[] = [
+    SecurityActionType.LOCK_CHANNELS,
+    SecurityActionType.RESTORE_RESOURCE,
+  ];
+
+  if (punishActor && punishableActor) {
+    actions.push(SecurityActionType.QUARANTINE_ACTOR);
+  }
+
+  actions.push(SecurityActionType.CREATE_INCIDENT, SecurityActionType.NOTIFY_AUDIT);
+
+  return Object.freeze(actions);
+}
+
+function shouldApplyChannelDeletionContainment(metadata: unknown): boolean {
+  const metadataRecord = readRecord(metadata);
+
+  return (
+    readBoolean(metadataRecord, 'channelContainmentRequired', 'channel_containment_required') === true ||
+    readBoolean(metadataRecord, 'unauthorizedChannelDeletion', 'unauthorized_channel_deletion') === true ||
+    readBoolean(metadataRecord, 'channelPolicyViolation', 'channel_policy_violation') === true ||
+    (typeof metadataRecord?.channelId === 'string' && metadataRecord.channelId.length > 0)
+  );
+}
+
 const ACTION_PRIORITY_MAP: Record<SecurityActionType, SecurityActionPriority> = {
   [SecurityActionType.NONE]: SecurityActionPriority.LOW,
   [SecurityActionType.INVESTIGATE]: SecurityActionPriority.NORMAL,
@@ -179,6 +232,10 @@ export class InMemorySecurityActionPlanner implements SecurityActionPlanner {
         ? resolveRoleEscalationActions(decisionModel.metadata)
         : decisionModel.decision === SecurityDecision.BLOCK && decisionModel.actionType === 'WEBHOOK_CREATE'
           ? resolveWebhookContainmentActions(decisionModel.metadata)
+          : decisionModel.decision === SecurityDecision.BLOCK &&
+              decisionModel.actionType === 'CHANNEL_DELETE' &&
+              shouldApplyChannelDeletionContainment(decisionModel.metadata)
+            ? resolveChannelDeletionContainmentActions(decisionModel.metadata)
           : actionTypes;
     const uniqueActionTypes = [...new Set(resolvedActionTypes)];
     const threatAssessment = this.readThreatAssessment(decisionModel.metadata);
