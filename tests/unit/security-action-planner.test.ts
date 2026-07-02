@@ -273,6 +273,54 @@ test('INTEGRATION_MANAGEMENT containment can be disabled by policy metadata', ()
   expect(plan.actions.map((action) => action.type)).toEqual([SecurityActionType.NONE]);
 });
 
+test('BLOCK on GUILD_CONFIGURATION_UPDATE plans actor quarantine and audit actions', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.GUILD_CONFIGURATION_UPDATE,
+    metadata: {
+      source: 'test',
+      actorId: 'actor-guild-config-1',
+      unauthorizedGuildConfigurationChange: true,
+      guildConfigurationContainmentRequired: true,
+      policy: {
+        guildConfigurationPunishActor: true,
+      },
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([
+    SecurityActionType.QUARANTINE_ACTOR,
+    SecurityActionType.CREATE_INCIDENT,
+    SecurityActionType.NOTIFY_AUDIT,
+  ]);
+});
+
+test('GUILD_CONFIGURATION_UPDATE containment can be disabled by policy metadata', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.GUILD_CONFIGURATION_UPDATE,
+    metadata: {
+      source: 'test',
+      actorId: 'actor-guild-config-2',
+      guildConfigurationContainmentRequired: false,
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([SecurityActionType.NONE]);
+});
+
 test('BLOCK on CHANNEL_DELETE plans lock, recovery trigger, and actor punishment once policy allows it', () => {
   const planner = new InMemorySecurityActionPlanner();
   const plan = planner.plan({

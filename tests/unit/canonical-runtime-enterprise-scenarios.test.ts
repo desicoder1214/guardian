@@ -72,6 +72,11 @@ const SUPPORTED_SCENARIOS = Object.freeze([
   { scenario: 'UNAUTHORIZED_PERMISSION_OVERWRITE', eventName: 'PERMISSION_OVERWRITE_UPDATE', expectedActionType: 'PERMISSION_OVERWRITE_UPDATE' },
   { scenario: 'UNAUTHORIZED_MEMBER_BAN', eventName: 'GUILD_BAN_ADD', expectedActionType: 'MEMBER_BAN' },
   { scenario: 'UNAUTHORIZED_MEMBER_KICK', eventName: 'MEMBER_REMOVE', expectedActionType: 'MEMBER_KICK' },
+  {
+    scenario: 'UNAUTHORIZED_GUILD_CONFIGURATION_CONTAINMENT',
+    eventName: 'GUILD_UPDATE',
+    expectedActionType: 'GUILD_CONFIGURATION_UPDATE',
+  },
 ]);
 
 const FAIL_CLOSED_SCENARIOS = Object.freeze([
@@ -1556,6 +1561,170 @@ describe('IntegratedCanonicalGuardianRuntime integration/application management 
 
     const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
     expect(urls.some((url) => url.includes('/api/v10/guilds/guild-integration-slice-1/integrations/application-target-only-1'))).toBe(true);
+  });
+});
+
+describe('IntegratedCanonicalGuardianRuntime guild configuration containment vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_TRUSTED_MEMBER_ADMIN_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildGuildUpdateEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      t: 'GUILD_UPDATE',
+      d: {
+        guildId: 'guild-guild-config-slice-1',
+        actorId: 'actor-guild-config-slice-1',
+        changedKeys: ['name', 'icon', 'verification_level', 'afk_channel_id'],
+        ...overrides,
+      },
+      ts: '2026-07-01T16:30:00.000Z',
+    };
+  }
+
+  test('unauthorized guild configuration changes execute actor containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-guild-config-slice-1',
+      'guild-guild-config-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildGuildUpdateEvent());
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/guilds/guild-guild-config-slice-1/members/actor-guild-config-slice-1'))).toBe(true);
+  });
+
+  test('authorized guild configuration actor performs no containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-guild-config-slice-2',
+      'guild-guild-config-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildGuildUpdateEvent({
+        authorizedGuildConfigurationActorIds: ['actor-guild-config-slice-1'],
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('guild owner exemption suppresses containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-guild-config-slice-3',
+      'guild-guild-config-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildGuildUpdateEvent({
+        actorId: 'owner-guild-config-1',
+        ownerId: 'owner-guild-config-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('duplicate/replay guild configuration events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-guild-config-slice-4',
+      'guild-guild-config-slice-1',
+    );
+
+    const replayEvent = buildGuildUpdateEvent({
+      actorId: 'actor-guild-config-replay-1',
+      changedKeys: ['name', 'locale'],
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    const actorContainmentCalls = fetchSpy.mock.calls.filter((call) =>
+      String((call as unknown[])[0] ?? '').includes('/api/v10/guilds/guild-guild-config-slice-1/members/actor-guild-config-replay-1'),
+    );
+    expect(actorContainmentCalls).toHaveLength(1);
+
+    const replaySuppressedLogs = transport.entries.filter(
+      (entry) => entry.level === 'warn' && entry.message === 'Canonical Guardian replay suppressed',
+    );
+    expect(replaySuppressedLogs.length).toBeGreaterThanOrEqual(1);
   });
 });
 

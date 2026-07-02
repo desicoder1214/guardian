@@ -30,6 +30,7 @@ import { UnauthorizedPermissionOverwriteDetector } from './discord/unauthorized-
 import { UnauthorizedMemberModerationDetector } from './discord/unauthorized-member-moderation-detector';
 import { UnauthorizedEmojiStickerDeletionDetector } from './discord/unauthorized-emoji-sticker-deletion-detector';
 import { UnauthorizedIntegrationManagementDetector } from './discord/unauthorized-integration-management-detector';
+import { UnauthorizedGuildConfigurationDetector } from './discord/unauthorized-guild-configuration-detector';
 import { DangerousRoleGrantDetector } from './discord/dangerous-role-grant-detector';
 import {
   InMemorySecurityContextBuilder,
@@ -118,6 +119,7 @@ enum EnterpriseOperationalScenario {
   UNAUTHORIZED_MEMBER_KICK = 'UNAUTHORIZED_MEMBER_KICK',
   UNAUTHORIZED_EMOJI_STICKER_DELETION = 'UNAUTHORIZED_EMOJI_STICKER_DELETION',
   UNAUTHORIZED_INTEGRATION_APPLICATION_MANAGEMENT = 'UNAUTHORIZED_INTEGRATION_APPLICATION_MANAGEMENT',
+  UNAUTHORIZED_GUILD_CONFIGURATION_CONTAINMENT = 'UNAUTHORIZED_GUILD_CONFIGURATION_CONTAINMENT',
   STARTUP_RECONCILIATION_AFTER_DOWNTIME = 'STARTUP_RECONCILIATION_AFTER_DOWNTIME',
   RECOVERY_RESTORATION = 'RECOVERY_RESTORATION',
 }
@@ -298,6 +300,12 @@ function resolveEnterpriseScenarioContract(
           actionType: PolicyActionType.INTEGRATION_MANAGEMENT,
           supportedByCanonicalDetectorPath: true,
         });
+      case EnterpriseOperationalScenario.UNAUTHORIZED_GUILD_CONFIGURATION_CONTAINMENT:
+        return Object.freeze({
+          scenario: override,
+          actionType: PolicyActionType.GUILD_CONFIGURATION_UPDATE,
+          supportedByCanonicalDetectorPath: true,
+        });
       case EnterpriseOperationalScenario.STARTUP_RECONCILIATION_AFTER_DOWNTIME:
         return Object.freeze({
           scenario: override,
@@ -428,6 +436,17 @@ function resolveEnterpriseScenarioContract(
       return Object.freeze({
         scenario: EnterpriseOperationalScenario.UNAUTHORIZED_INTEGRATION_APPLICATION_MANAGEMENT,
         actionType: PolicyActionType.INTEGRATION_MANAGEMENT,
+        supportedByCanonicalDetectorPath: true,
+      });
+    case 'GUILD_UPDATE':
+    case 'GUILD_SETTINGS_UPDATE':
+    case 'GUILD_CONFIGURATION_UPDATE':
+    case 'GUILD_FEATURES_UPDATE':
+    case 'GUILD_LOCALE_UPDATE':
+    case 'GUILD_COMMUNITY_UPDATE':
+      return Object.freeze({
+        scenario: EnterpriseOperationalScenario.UNAUTHORIZED_GUILD_CONFIGURATION_CONTAINMENT,
+        actionType: PolicyActionType.GUILD_CONFIGURATION_UPDATE,
         supportedByCanonicalDetectorPath: true,
       });
     case 'MEMBER_REMOVE':
@@ -1433,6 +1452,25 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return Object.freeze([...new Set([...this.runtimeAuthorizedStickerIds, ...inline])]);
   }
 
+  private resolveGuildOwnerIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const ownerId = this.readString(record, 'ownerId', 'owner_id', 'guildOwnerId', 'guild_owner_id');
+    const ownerIds = this.readStringArray(record, 'ownerIds');
+    const guildOwnerIds = this.readStringArray(record, 'guildOwnerIds');
+
+    return Object.freeze([
+      ...new Set([...(ownerId ? [ownerId] : []), ...ownerIds, ...guildOwnerIds]),
+    ]);
+  }
+
+  private resolveAuthorizedGuildConfigurationActorIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedGuildConfigurationActorIds');
+    const alternateInline = this.readStringArray(record, 'authorized_guild_configuration_actor_ids');
+
+    return Object.freeze([...new Set([...inline, ...alternateInline])]);
+  }
+
   private buildReplaySuppressionKey(
     event: DiscordGatewayNormalizedEvent,
     actionType: PolicyActionType,
@@ -1480,6 +1518,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     if (actionType === PolicyActionType.INTEGRATION_MANAGEMENT && (integrationId || applicationId)) {
       return ['integration-management', this.guildId, integrationId ?? applicationId ?? 'unknown-integration', actorId].join(':');
+    }
+
+    if (actionType === PolicyActionType.GUILD_CONFIGURATION_UPDATE) {
+      return ['guild-configuration', this.guildId, actorId, event.eventName].join(':');
     }
 
     if (
@@ -1758,6 +1800,40 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     });
   }
 
+  private readUnauthorizedGuildConfigurationDetectionMetadata(
+    detectionResults: readonly DetectionResult[],
+  ): {
+    readonly unauthorizedGuildConfigurationChange: boolean;
+    readonly guildConfigurationPolicyViolation: boolean;
+    readonly isAuthorizedActor: boolean;
+    readonly isTrustedActor: boolean;
+    readonly isOwnerActor: boolean;
+    readonly securityRelevantChanges: readonly string[];
+  } {
+    const detectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-guild-configuration-detector',
+    );
+
+    const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
+      ? (detectorResult.metadata as Record<string, unknown>)
+      : undefined;
+    const securityRelevantChanges =
+      metadata?.securityRelevantChanges && Array.isArray(metadata.securityRelevantChanges)
+        ? metadata.securityRelevantChanges.filter(
+            (field): field is string => typeof field === 'string' && field.length > 0,
+          )
+        : [];
+
+    return Object.freeze({
+      unauthorizedGuildConfigurationChange: detectorResult?.matched === true,
+      guildConfigurationPolicyViolation: metadata?.guildConfigurationPolicyViolation === true,
+      isAuthorizedActor: metadata?.isAuthorizedActor === true,
+      isTrustedActor: metadata?.isTrustedActor === true,
+      isOwnerActor: metadata?.isOwnerActor === true,
+      securityRelevantChanges: Object.freeze(securityRelevantChanges),
+    });
+  }
+
   private pruneChannelPunishmentSuppressionKeys(nowMs: number): void {
     for (const [key, expiresAtMs] of this.processedChannelPunishmentKeys.entries()) {
       if (expiresAtMs <= nowMs) {
@@ -1906,6 +1982,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           return AuditActionType.MEMBER_KICK;
         case PolicyActionType.INTEGRATION_MANAGEMENT:
           return AuditActionType.INTEGRATION_MANAGEMENT;
+        case PolicyActionType.GUILD_CONFIGURATION_UPDATE:
+          return AuditActionType.GUILD_CONFIGURATION_UPDATE;
         default:
           return AuditActionType.BOT_ADD;
       }
@@ -1968,6 +2046,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     integrationPolicyViolation: boolean,
     isAuthorizedApplication: boolean,
     isTrustedIntegrationActor: boolean,
+    unauthorizedGuildConfigurationChange: boolean,
+    guildConfigurationPolicyViolation: boolean,
+    securityRelevantGuildConfigurationChanges: readonly string[],
+    isAuthorizedGuildConfigurationActor: boolean,
+    isTrustedGuildConfigurationActor: boolean,
+    isOwnerGuildActor: boolean,
     unauthorizedChannelCreation: boolean,
     unauthorizedChannelDeletion: boolean,
     isAuthorizedChannel: boolean,
@@ -2050,6 +2134,15 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         applicationPolicyViolation: integrationPolicyViolation,
         isAuthorizedApplication,
         isTrustedIntegrationActor,
+        unauthorizedGuildConfigurationChange,
+        guildConfigurationPolicyViolation,
+        securityRelevantGuildConfigurationChanges,
+        guildConfigurationContainmentRequired: unauthorizedGuildConfigurationChange,
+        policyGuildConfigurationPunishActor:
+          memberModerationContainmentPolicy.punishActor && !memberPunishmentSuppressed,
+        isAuthorizedGuildConfigurationActor,
+        isTrustedGuildConfigurationActor,
+        isOwnerGuildActor,
         unauthorizedChannelCreation,
         unauthorizedChannelDeletion,
         channelContainmentRequired:
@@ -2100,6 +2193,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           integrationPunishActor: true,
           integrationContainmentRequired: unauthorizedIntegrationManagement,
           integrationPolicyViolation,
+          guildConfigurationContainmentRequired: unauthorizedGuildConfigurationChange,
+          guildConfigurationPunishActor: memberModerationContainmentPolicy.punishActor && !memberPunishmentSuppressed,
+          guildConfigurationPolicyViolation,
           channelPunishActor: channelContainmentPolicy.punishActor && !channelPunishmentSuppressed,
           channelContainmentRequired:
             channelContainmentPolicy.containmentRequired && (unauthorizedChannelCreation || unauthorizedChannelDeletion),
@@ -2124,6 +2220,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.detectorRegistry.register(new UnauthorizedMemberModerationDetector());
     this.detectorRegistry.register(new UnauthorizedEmojiStickerDeletionDetector());
     this.detectorRegistry.register(new UnauthorizedIntegrationManagementDetector());
+    this.detectorRegistry.register(new UnauthorizedGuildConfigurationDetector());
     this.detectorRegistry.register(new DangerousRoleGrantDetectorPluginAdapter());
     this.detectorRegistry.register(
       new ScenarioContractDetectorPlugin(
@@ -2263,6 +2360,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       case 'APPLICATION_CONFIGURATION_UPDATE':
       case 'APPLICATION_CONFIG_UPDATE':
         return PolicyActionType.INTEGRATION_MANAGEMENT;
+      case 'GUILD_UPDATE':
+      case 'GUILD_SETTINGS_UPDATE':
+      case 'GUILD_CONFIGURATION_UPDATE':
+      case 'GUILD_FEATURES_UPDATE':
+      case 'GUILD_LOCALE_UPDATE':
+      case 'GUILD_COMMUNITY_UPDATE':
+        return PolicyActionType.GUILD_CONFIGURATION_UPDATE;
       default:
         return PolicyActionType.BOT_ADD;
     }
@@ -2374,6 +2478,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const trustedRoleAdminIds = this.resolveTrustedRoleAdminIds(event.payload);
     const authorizedMemberIds = this.resolveAuthorizedMemberIds(event.payload);
     const trustedMemberAdminIds = this.resolveTrustedMemberAdminIds(event.payload);
+    const guildOwnerIds = this.resolveGuildOwnerIds(event.payload);
+    const authorizedGuildConfigurationActorIds = this.resolveAuthorizedGuildConfigurationActorIds(event.payload);
     const authorizedEmojiIds = this.resolveAuthorizedEmojiIds(event.payload);
     const authorizedStickerIds = this.resolveAuthorizedStickerIds(event.payload);
     this.stageAuditLogEntries(event, actionType);
@@ -2445,6 +2551,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
             authorizedStickerIds,
             authorizedActorIds: trustedMemberAdminIds,
             trustedActorIds: trustedMemberAdminIds,
+          }),
+          ownerIds: guildOwnerIds,
+          guildConfigurationAuthorization: Object.freeze({
+            authorizedActorIds: authorizedGuildConfigurationActorIds,
+            trustedActorIds: trustedMemberAdminIds,
+            ownerIds: guildOwnerIds,
           }),
         }),
       }),
@@ -2527,6 +2639,23 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         actorId,
         integrationId,
         applicationId,
+      });
+      return;
+    }
+
+    if (
+      actionType === PolicyActionType.GUILD_CONFIGURATION_UPDATE &&
+      !effectiveDetectionResults.some(
+        (result) => result.detectorId === 'unauthorized-guild-configuration-detector' && result.matched,
+      )
+    ) {
+      this.logger.info('Canonical Guardian guild configuration containment not required', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        actorId,
       });
       return;
     }
@@ -2645,6 +2774,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const integrationDetectionMetadata = this.readUnauthorizedIntegrationManagementDetectionMetadata(
       effectiveDetectionResults,
     );
+    const guildConfigurationDetectionMetadata = this.readUnauthorizedGuildConfigurationDetectionMetadata(
+      effectiveDetectionResults,
+    );
     const rolePunishmentSuppressed =
       ((actionType === PolicyActionType.ROLE_CREATE && roleCreationDetectionMetadata.unauthorizedRoleCreation) ||
         (actionType === PolicyActionType.ROLE_DELETE && roleDeletionDetectionMetadata.unauthorizedRoleDeletion))
@@ -2658,8 +2790,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         ? this.shouldSuppressChannelActorPunishment(effectiveActorId, nowMs)
         : false;
     const memberPunishmentSuppressed =
-      (actionType === PolicyActionType.MEMBER_BAN || actionType === PolicyActionType.MEMBER_KICK) &&
-      memberModerationDetectionMetadata.unauthorizedMemberModeration
+      ((actionType === PolicyActionType.MEMBER_BAN || actionType === PolicyActionType.MEMBER_KICK) &&
+        memberModerationDetectionMetadata.unauthorizedMemberModeration) ||
+      (actionType === PolicyActionType.GUILD_CONFIGURATION_UPDATE &&
+        guildConfigurationDetectionMetadata.unauthorizedGuildConfigurationChange)
         ? this.shouldSuppressMemberActorPunishment(effectiveActorId, nowMs)
         : false;
     const effectiveRoleContainmentPolicy = this.mergeRoleContainmentPolicyFromDetections(
@@ -2690,6 +2824,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       integrationDetectionMetadata.integrationPolicyViolation,
       integrationDetectionMetadata.isAuthorizedApplication,
       integrationDetectionMetadata.isTrustedActor,
+      guildConfigurationDetectionMetadata.unauthorizedGuildConfigurationChange,
+      guildConfigurationDetectionMetadata.guildConfigurationPolicyViolation,
+      guildConfigurationDetectionMetadata.securityRelevantChanges,
+      guildConfigurationDetectionMetadata.isAuthorizedActor,
+      guildConfigurationDetectionMetadata.isTrustedActor,
+      guildConfigurationDetectionMetadata.isOwnerActor,
       channelDetectionMetadata.unauthorizedChannelCreation,
       channelDetectionMetadata.unauthorizedChannelDeletion,
       channelDetectionMetadata.isAuthorizedChannel,

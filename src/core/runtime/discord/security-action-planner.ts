@@ -522,6 +522,49 @@ function resolveMemberModerationContainmentActions(metadata: unknown): readonly 
   return Object.freeze(actions);
 }
 
+function resolveGuildConfigurationContainmentActions(metadata: unknown): readonly SecurityActionType[] {
+  const metadataRecord = readRecord(metadata);
+  const policyRecord = readRecord(metadataRecord?.policy);
+
+  const containmentRequired = readBoolean(
+    metadataRecord,
+    'guildConfigurationContainmentRequired',
+    'guild_configuration_containment_required',
+  ) ?? true;
+  const punishActor = readBoolean(
+    metadataRecord,
+    'policyGuildConfigurationPunishActor',
+    'policy_guild_configuration_punish_actor',
+  ) ?? readBoolean(
+    policyRecord,
+    'guildConfigurationPunishActor',
+    'guild_configuration_punish_actor',
+  ) ?? readBoolean(
+    policyRecord,
+    'punishActor',
+    'punish_actor',
+  ) ?? true;
+  const actorId =
+    (typeof metadataRecord?.actorId === 'string' && metadataRecord.actorId.length > 0
+      ? metadataRecord.actorId
+      : undefined) ?? 'unknown-actor';
+  const punishableActor = actorId !== 'unknown-actor';
+
+  if (!containmentRequired) {
+    return Object.freeze([SecurityActionType.NONE]);
+  }
+
+  const actions: SecurityActionType[] = [];
+
+  if (punishActor && punishableActor) {
+    actions.push(SecurityActionType.QUARANTINE_ACTOR);
+  }
+
+  actions.push(SecurityActionType.CREATE_INCIDENT, SecurityActionType.NOTIFY_AUDIT);
+
+  return Object.freeze(actions);
+}
+
 function shouldApplyMemberModerationContainment(metadata: unknown): boolean {
   const metadataRecord = readRecord(metadata);
 
@@ -583,6 +626,9 @@ export class InMemorySecurityActionPlanner implements SecurityActionPlanner {
                 (decisionModel.actionType === 'MEMBER_BAN' || decisionModel.actionType === 'MEMBER_KICK') &&
                 shouldApplyMemberModerationContainment(decisionModel.metadata)
               ? resolveMemberModerationContainmentActions(decisionModel.metadata)
+            : decisionModel.decision === SecurityDecision.BLOCK &&
+              decisionModel.actionType === 'GUILD_CONFIGURATION_UPDATE'
+              ? resolveGuildConfigurationContainmentActions(decisionModel.metadata)
           : actionTypes;
     const uniqueActionTypes = [...new Set(resolvedActionTypes)];
     const threatAssessment = this.readThreatAssessment(decisionModel.metadata);

@@ -25,6 +25,7 @@ import {
 export const SECURITY_ACTION_TO_AUDIT_ACTION_MAP: Readonly<Record<SecurityActionType, AuditActionType>> = {
   [SecurityActionType.MEMBER_BAN]: AuditActionType.MEMBER_BAN,
   [SecurityActionType.MEMBER_KICK]: AuditActionType.MEMBER_KICK,
+  [SecurityActionType.GUILD_CONFIGURATION_UPDATE]: AuditActionType.GUILD_CONFIGURATION_UPDATE,
   [SecurityActionType.CHANNEL_CREATE]: AuditActionType.CHANNEL_CREATE,
   [SecurityActionType.CHANNEL_DELETE]: AuditActionType.CHANNEL_DELETE,
   [SecurityActionType.PERMISSION_OVERWRITE_UPDATE]: AuditActionType.PERMISSION_OVERWRITE_UPDATE,
