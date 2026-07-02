@@ -27,6 +27,7 @@ export const SECURITY_ACTION_TO_AUDIT_ACTION_MAP: Readonly<Record<SecurityAction
   [SecurityActionType.MEMBER_KICK]: AuditActionType.MEMBER_KICK,
   [SecurityActionType.CHANNEL_CREATE]: AuditActionType.CHANNEL_CREATE,
   [SecurityActionType.CHANNEL_DELETE]: AuditActionType.CHANNEL_DELETE,
+  [SecurityActionType.PERMISSION_OVERWRITE_UPDATE]: AuditActionType.PERMISSION_OVERWRITE_UPDATE,
   [SecurityActionType.ROLE_CREATE]: AuditActionType.ROLE_CREATE,
   [SecurityActionType.ROLE_DELETE]: AuditActionType.ROLE_DELETE,
   [SecurityActionType.WEBHOOK_CREATE]: AuditActionType.WEBHOOK_CREATE,

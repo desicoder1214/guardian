@@ -25,6 +25,7 @@ import { UnauthorizedChannelCreateDetector } from './discord/unauthorized-channe
 import { UnauthorizedChannelDeleteDetector } from './discord/unauthorized-channel-delete-detector';
 import { UnauthorizedRoleDeleteDetector } from './discord/unauthorized-role-delete-detector';
 import { UnauthorizedRoleCreateDetector } from './discord/unauthorized-role-create-detector';
+import { UnauthorizedPermissionOverwriteDetector } from './discord/unauthorized-permission-overwrite-detector';
 import { DangerousRoleGrantDetector } from './discord/dangerous-role-grant-detector';
 import {
   InMemorySecurityContextBuilder,
@@ -108,6 +109,7 @@ enum EnterpriseOperationalScenario {
   PRIVILEGED_PERMISSION_ESCALATION = 'PRIVILEGED_PERMISSION_ESCALATION',
   UNAUTHORIZED_CHANNEL_CREATION = 'UNAUTHORIZED_CHANNEL_CREATION',
   CHANNEL_PERMISSION_DRIFT = 'CHANNEL_PERMISSION_DRIFT',
+  UNAUTHORIZED_PERMISSION_OVERWRITE = 'UNAUTHORIZED_PERMISSION_OVERWRITE',
   STARTUP_RECONCILIATION_AFTER_DOWNTIME = 'STARTUP_RECONCILIATION_AFTER_DOWNTIME',
   RECOVERY_RESTORATION = 'RECOVERY_RESTORATION',
 }
@@ -258,6 +260,12 @@ function resolveEnterpriseScenarioContract(
           actionType: PolicyActionType.CHANNEL_DELETE,
           supportedByCanonicalDetectorPath: true,
         });
+      case EnterpriseOperationalScenario.UNAUTHORIZED_PERMISSION_OVERWRITE:
+        return Object.freeze({
+          scenario: override,
+          actionType: PolicyActionType.PERMISSION_OVERWRITE_UPDATE,
+          supportedByCanonicalDetectorPath: true,
+        });
       case EnterpriseOperationalScenario.STARTUP_RECONCILIATION_AFTER_DOWNTIME:
         return Object.freeze({
           scenario: override,
@@ -349,6 +357,17 @@ function resolveEnterpriseScenarioContract(
       return Object.freeze({
         scenario: EnterpriseOperationalScenario.CHANNEL_PERMISSION_DRIFT,
         actionType: PolicyActionType.CHANNEL_DELETE,
+        supportedByCanonicalDetectorPath: true,
+      });
+    case 'PERMISSION_OVERWRITE_CREATE':
+    case 'PERMISSION_OVERWRITE_UPDATE':
+    case 'PERMISSION_OVERWRITE_DELETE':
+    case 'CHANNEL_OVERWRITE_CREATE':
+    case 'CHANNEL_OVERWRITE_UPDATE':
+    case 'CHANNEL_OVERWRITE_DELETE':
+      return Object.freeze({
+        scenario: EnterpriseOperationalScenario.UNAUTHORIZED_PERMISSION_OVERWRITE,
+        actionType: PolicyActionType.PERMISSION_OVERWRITE_UPDATE,
         supportedByCanonicalDetectorPath: true,
       });
     case 'STARTUP_RECONCILIATION_AFTER_DOWNTIME':
@@ -446,6 +465,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private readonly runtimeAuthorizedWebhookIds: readonly string[];
   private readonly runtimeAuthorizedIntegrationIds: readonly string[];
   private readonly runtimeAuthorizedChannelIds: readonly string[];
+  private readonly runtimeAuthorizedOverwriteIds: readonly string[];
   private readonly runtimeTrustedChannelAdminIds: readonly string[];
   private readonly runtimeAuthorizedRoleIds: readonly string[];
   private readonly runtimeTrustedRoleAdminIds: readonly string[];
@@ -472,6 +492,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.runtimeAuthorizedWebhookIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_WEBHOOK_IDS');
     this.runtimeAuthorizedIntegrationIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_INTEGRATION_IDS');
     this.runtimeAuthorizedChannelIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_CHANNEL_IDS');
+    this.runtimeAuthorizedOverwriteIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_OVERWRITE_IDS');
     this.runtimeTrustedChannelAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_CHANNEL_ADMIN_IDS');
     this.runtimeAuthorizedRoleIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_ROLE_IDS');
     this.runtimeTrustedRoleAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_ROLE_ADMIN_IDS');
@@ -618,6 +639,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           }),
           Object.freeze({
             actionType: PolicyActionType.CHANNEL_DELETE,
+            enabled: true,
+            threshold: 0,
+            windowMs: 60_000,
+            decisionOnViolation: SecurityDecision.BLOCK,
+          }),
+          Object.freeze({
+            actionType: PolicyActionType.PERMISSION_OVERWRITE_UPDATE,
             enabled: true,
             threshold: 0,
             windowMs: 60_000,
@@ -820,6 +848,27 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     const channel = this.readRecord(record?.channel);
     return this.readString(channel, 'id', 'channelId', 'channel_id');
+  }
+
+  private readOverwriteId(payload: unknown): string | undefined {
+    const record = this.readRecord(payload);
+    const direct = this.readString(
+      record,
+      'overwriteId',
+      'overwrite_id',
+      'targetOverwriteId',
+      'target_overwrite_id',
+      'targetId',
+      'target_id',
+      'resourceId',
+      'resource_id',
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const overwrite = this.readRecord(record?.overwrite);
+    return this.readString(overwrite, 'id', 'overwriteId', 'overwrite_id');
   }
 
   private readRoleContainmentPolicy(payload: unknown): {
@@ -1179,6 +1228,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return Object.freeze([...new Set([...this.runtimeTrustedChannelAdminIds, ...this.trustedInviterIds, ...inline])]);
   }
 
+  private resolveAuthorizedOverwriteIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedOverwriteIds');
+    return Object.freeze([...new Set([...this.runtimeAuthorizedOverwriteIds, ...inline])]);
+  }
+
   private resolveAuthorizedRoleIds(payload: unknown): readonly string[] {
     const record = this.readRecord(payload);
     const inline = this.readStringArray(record, 'authorizedRoleIds');
@@ -1200,6 +1255,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     roleId: string | undefined,
     webhookId: string | undefined,
     channelId: string | undefined,
+    overwriteId: string | undefined,
   ): string {
     if (botId) {
       return ['bot-add', this.guildId, botId, actorId].join(':');
@@ -1223,6 +1279,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     if (actionType === PolicyActionType.CHANNEL_DELETE && channelId) {
       return ['channel-delete', this.guildId, channelId, actorId].join(':');
+    }
+
+    if (actionType === PolicyActionType.PERMISSION_OVERWRITE_UPDATE && channelId && overwriteId) {
+      return ['permission-overwrite', this.guildId, channelId, overwriteId, actorId].join(':');
     }
 
     return ['event', this.guildId, event.eventName, event.correlationId].join(':');
@@ -1351,6 +1411,32 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       isAuthorizedChannel: createMetadata?.isAuthorizedChannel === true || deleteMetadata?.isAuthorizedChannel === true,
       isAuthorizedActor: createMetadata?.isAuthorizedActor === true || deleteMetadata?.isAuthorizedActor === true,
       isTrustedActor: createMetadata?.isTrustedActor === true || deleteMetadata?.isTrustedActor === true,
+    });
+  }
+
+  private readUnauthorizedPermissionOverwriteDetectionMetadata(
+    detectionResults: readonly DetectionResult[],
+  ): {
+    readonly unauthorizedPermissionOverwrite: boolean;
+    readonly overwritePolicyViolation: boolean;
+    readonly isAuthorizedOverwrite: boolean;
+    readonly isAuthorizedActor: boolean;
+    readonly isTrustedActor: boolean;
+  } {
+    const detectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-permission-overwrite-detector',
+    );
+
+    const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
+      ? (detectorResult.metadata as Record<string, unknown>)
+      : undefined;
+
+    return Object.freeze({
+      unauthorizedPermissionOverwrite: detectorResult?.matched === true,
+      overwritePolicyViolation: metadata?.overwritePolicyViolation === true,
+      isAuthorizedOverwrite: metadata?.isAuthorizedOverwrite === true,
+      isAuthorizedActor: metadata?.isAuthorizedActor === true,
+      isTrustedActor: metadata?.isTrustedActor === true,
     });
   }
 
@@ -1508,6 +1594,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           return AuditActionType.WEBHOOK_DELETE;
         case PolicyActionType.CHANNEL_DELETE:
           return AuditActionType.CHANNEL_DELETE;
+        case PolicyActionType.PERMISSION_OVERWRITE_UPDATE:
+          return AuditActionType.PERMISSION_OVERWRITE_UPDATE;
         default:
           return AuditActionType.BOT_ADD;
       }
@@ -1547,6 +1635,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     botId: string | undefined,
     webhookId: string | undefined,
     channelId: string | undefined,
+    overwriteId: string | undefined,
     memberUserId: string | undefined,
     roleId: string | undefined,
     roleContainmentPolicy: {
@@ -1568,6 +1657,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     isAuthorizedChannel: boolean,
     isAuthorizedActor: boolean,
     isTrustedChannelActor: boolean,
+    unauthorizedPermissionOverwrite: boolean,
+    overwritePolicyViolation: boolean,
+    isAuthorizedOverwrite: boolean,
+    isAuthorizedPermissionActor: boolean,
+    isTrustedPermissionActor: boolean,
     unauthorizedRoleCreation: boolean,
     roleCreationPolicyViolation: boolean,
     isAuthorizedRoleCreationRole: boolean,
@@ -1606,6 +1700,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         botUserId: botId,
         webhookId,
         channelId,
+        overwriteId,
         memberUserId,
         roleId,
         eventName: event.eventName,
@@ -1628,6 +1723,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         isAuthorizedChannel,
         isAuthorizedActor,
         isTrustedChannelActor,
+        unauthorizedPermissionOverwrite,
+        overwritePolicyViolation,
+        permissionOverwriteContainmentRequired: unauthorizedPermissionOverwrite,
+        permissionOverwritePolicyViolation: overwritePolicyViolation,
+        isAuthorizedOverwrite,
+        isAuthorizedPermissionActor,
+        isTrustedPermissionActor,
         policyChannelPunishActor: channelContainmentPolicy.punishActor && !channelPunishmentSuppressed,
         unauthorizedRoleCreation,
         roleCreationPolicyViolation,
@@ -1655,6 +1757,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           channelPunishActor: channelContainmentPolicy.punishActor && !channelPunishmentSuppressed,
           channelContainmentRequired:
             channelContainmentPolicy.containmentRequired && (unauthorizedChannelCreation || unauthorizedChannelDeletion),
+          permissionOverwriteContainmentRequired: unauthorizedPermissionOverwrite,
         }),
       }),
     });
@@ -1667,6 +1770,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.detectorRegistry.register(new UnauthorizedChannelDeleteDetector());
     this.detectorRegistry.register(new UnauthorizedRoleCreateDetector());
     this.detectorRegistry.register(new UnauthorizedRoleDeleteDetector());
+    this.detectorRegistry.register(new UnauthorizedPermissionOverwriteDetector());
     this.detectorRegistry.register(new DangerousRoleGrantDetectorPluginAdapter());
     this.detectorRegistry.register(
       new ScenarioContractDetectorPlugin(
@@ -1716,6 +1820,25 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         EnterpriseOperationalScenario.CHANNEL_PERMISSION_DRIFT,
       ),
     );
+    this.detectorRegistry.register(
+      new ScenarioContractDetectorPlugin(
+        'permission-overwrite-modification-detector',
+        '1.0.0',
+        80,
+        Object.freeze([PolicyActionType.PERMISSION_OVERWRITE_UPDATE]),
+        Object.freeze([
+          'PERMISSION_OVERWRITE_CREATE',
+          'PERMISSION_OVERWRITE_UPDATE',
+          'PERMISSION_OVERWRITE_DELETE',
+          'CHANNEL_OVERWRITE_CREATE',
+          'CHANNEL_OVERWRITE_UPDATE',
+          'CHANNEL_OVERWRITE_DELETE',
+        ]),
+        'Unauthorized permission overwrite change detected',
+        DetectionSeverity.CRITICAL,
+        EnterpriseOperationalScenario.UNAUTHORIZED_PERMISSION_OVERWRITE,
+      ),
+    );
   }
 
   private resolveExecutionService(): DiscordExecutionService {
@@ -1762,6 +1885,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         return PolicyActionType.WEBHOOK_DELETE;
       case 'CHANNEL_DELETE':
         return PolicyActionType.CHANNEL_DELETE;
+      case 'PERMISSION_OVERWRITE_CREATE':
+      case 'PERMISSION_OVERWRITE_UPDATE':
+      case 'PERMISSION_OVERWRITE_DELETE':
+      case 'CHANNEL_OVERWRITE_CREATE':
+      case 'CHANNEL_OVERWRITE_UPDATE':
+      case 'CHANNEL_OVERWRITE_DELETE':
+        return PolicyActionType.PERMISSION_OVERWRITE_UPDATE;
       default:
         return PolicyActionType.BOT_ADD;
     }
@@ -1806,6 +1936,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const botId = this.readBotId(event.payload);
     const webhookId = this.readWebhookId(event.payload);
     const channelId = this.readChannelId(event.payload);
+    const overwriteId = this.readOverwriteId(event.payload);
     const memberUserId = this.readMemberUserId(event.payload);
     const roleId = this.readRoleId(event.payload);
     const roleContainmentPolicy = this.readRoleContainmentPolicy(event.payload);
@@ -1841,6 +1972,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       roleId,
       webhookId,
       channelId,
+      overwriteId,
     );
     if (this.hasReplaySuppressionKey(replaySuppressionKey, nowMs)) {
       this.logger.warn('Canonical Guardian replay suppressed', {
@@ -1859,6 +1991,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const authorizedWebhookIds = this.resolveAuthorizedWebhookIds(event.payload);
     const authorizedIntegrationIds = this.resolveAuthorizedIntegrationIds(event.payload);
     const authorizedChannelIds = this.resolveAuthorizedChannelIds(event.payload);
+    const authorizedOverwriteIds = this.resolveAuthorizedOverwriteIds(event.payload);
     const trustedChannelAdminIds = this.resolveTrustedChannelAdminIds(event.payload);
     const authorizedRoleIds = this.resolveAuthorizedRoleIds(event.payload);
     const trustedRoleAdminIds = this.resolveTrustedRoleAdminIds(event.payload);
@@ -1892,8 +2025,14 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
             authorizedIntegrationIds,
           }),
           authorizedChannelIds,
+          authorizedOverwriteIds,
           authorizedActorIds: trustedChannelAdminIds,
           trustedActorIds: trustedChannelAdminIds,
+          permissionOverwriteAuthorization: Object.freeze({
+            authorizedOverwriteIds,
+            authorizedActorIds: trustedChannelAdminIds,
+            trustedActorIds: trustedChannelAdminIds,
+          }),
           channelAuthorization: Object.freeze({
             authorizedChannelIds,
             authorizedActorIds: trustedChannelAdminIds,
@@ -2005,6 +2144,25 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     }
 
     if (
+      actionType === PolicyActionType.PERMISSION_OVERWRITE_UPDATE &&
+      !effectiveDetectionResults.some(
+        (result) => result.detectorId === 'unauthorized-permission-overwrite-detector' && result.matched,
+      )
+    ) {
+      this.logger.info('Canonical Guardian permission overwrite containment not required', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        actorId,
+        channelId,
+        overwriteId,
+      });
+      return;
+    }
+
+    if (
       actionType === PolicyActionType.ROLE_DELETE &&
       !effectiveDetectionResults.some(
         (result) => result.detectorId === 'unauthorized-role-delete-detector' && result.matched,
@@ -2031,6 +2189,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const botDetectionMetadata = this.readUnauthorizedBotDetectionMetadata(effectiveDetectionResults);
     const webhookDetectionMetadata = this.readUnauthorizedWebhookDetectionMetadata(effectiveDetectionResults);
     const channelDetectionMetadata = this.readUnauthorizedChannelDetectionMetadata(effectiveDetectionResults);
+    const permissionOverwriteDetectionMetadata = this.readUnauthorizedPermissionOverwriteDetectionMetadata(
+      effectiveDetectionResults,
+    );
     const roleCreationDetectionMetadata = this.readUnauthorizedRoleCreationDetectionMetadata(effectiveDetectionResults);
     const roleDeletionDetectionMetadata = this.readUnauthorizedRoleDeletionDetectionMetadata(effectiveDetectionResults);
     const rolePunishmentSuppressed =
@@ -2040,7 +2201,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         : false;
     const channelPunishmentSuppressed =
       ((actionType === PolicyActionType.CHANNEL_CREATE && channelDetectionMetadata.unauthorizedChannelCreation) ||
-        (actionType === PolicyActionType.CHANNEL_DELETE && channelDetectionMetadata.unauthorizedChannelDeletion))
+        (actionType === PolicyActionType.CHANNEL_DELETE && channelDetectionMetadata.unauthorizedChannelDeletion) ||
+        (actionType === PolicyActionType.PERMISSION_OVERWRITE_UPDATE &&
+          permissionOverwriteDetectionMetadata.unauthorizedPermissionOverwrite))
         ? this.shouldSuppressChannelActorPunishment(effectiveActorId, nowMs)
         : false;
     const effectiveRoleContainmentPolicy = this.mergeRoleContainmentPolicyFromDetections(
@@ -2054,6 +2217,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       botId,
       webhookId,
       channelId,
+      overwriteId,
       memberUserId,
       roleId,
       effectiveRoleContainmentPolicy,
@@ -2069,6 +2233,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       channelDetectionMetadata.isAuthorizedChannel,
       channelDetectionMetadata.isAuthorizedActor,
       channelDetectionMetadata.isTrustedActor,
+      permissionOverwriteDetectionMetadata.unauthorizedPermissionOverwrite,
+      permissionOverwriteDetectionMetadata.overwritePolicyViolation,
+      permissionOverwriteDetectionMetadata.isAuthorizedOverwrite,
+      permissionOverwriteDetectionMetadata.isAuthorizedActor,
+      permissionOverwriteDetectionMetadata.isTrustedActor,
       roleCreationDetectionMetadata.unauthorizedRoleCreation,
       roleCreationDetectionMetadata.roleCreationPolicyViolation,
       roleCreationDetectionMetadata.isAuthorizedRole,

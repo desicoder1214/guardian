@@ -181,6 +181,13 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
         'targetChannelId',
         'target_channel_id',
       );
+      const overwriteId = readString(
+        securityDecisionMetadata,
+        'overwriteId',
+        'overwrite_id',
+        'targetOverwriteId',
+        'target_overwrite_id',
+      );
       const request = freezeRequest({
         route,
         planId: routingResult.planId,
@@ -201,6 +208,7 @@ export class InMemorySecurityExecutionDispatcher implements SecurityExecutionDis
           ...(roleId ? { roleId } : {}),
           ...(webhookId ? { webhookId } : {}),
           ...(channelId ? { channelId } : {}),
+          ...(overwriteId ? { overwriteId } : {}),
           executionPlanId: routingResult.executionPlanId,
           securityDecisionMetadata,
         }),

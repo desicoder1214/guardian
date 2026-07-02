@@ -64,8 +64,61 @@ function freezeMetadata(metadata?: Record<string, unknown>): Record<string, unkn
   return metadata ? Object.freeze({ ...metadata }) : undefined;
 }
 
+function readRecord(value: unknown): Record<string, unknown> | undefined {
+  if (!value || typeof value !== 'object') {
+    return undefined;
+  }
+
+  return value as Record<string, unknown>;
+}
+
+function readString(record: Record<string, unknown> | undefined, ...keys: string[]): string | undefined {
+  if (!record) {
+    return undefined;
+  }
+
+  for (const key of keys) {
+    const value = record[key];
+    if (typeof value === 'string' && value.length > 0) {
+      return value;
+    }
+  }
+
+  return undefined;
+}
+
 function toIdempotencyKey(executionPlan: SecurityExecutionPlan): string {
-  return `${executionPlan.planId}:${executionPlan.correlationId}`;
+  const base = `${executionPlan.planId}:${executionPlan.correlationId}`;
+  const metadata = readRecord(executionPlan.securityDecision.metadata);
+  const resourceIdentity =
+    readString(
+      metadata,
+      'webhookId',
+      'webhook_id',
+      'channelId',
+      'channel_id',
+      'overwriteId',
+      'overwrite_id',
+      'roleId',
+      'role_id',
+      'memberUserId',
+      'member_user_id',
+      'botId',
+      'bot_id',
+      'botUserId',
+      'bot_user_id',
+    );
+
+  if (!resourceIdentity) {
+    return base;
+  }
+
+  const actorIdentity = readString(metadata, 'actorId', 'actor_id') ?? 'unknown-actor';
+  const eventName = readString(metadata, 'eventName', 'event_name') ?? 'unknown-event';
+
+  // Keep replay protection strict for true duplicates while preventing cross-incident collapse
+  // when two distinct resources share a coarse correlation id.
+  return `${base}:${eventName}:${resourceIdentity}:${actorIdentity}`;
 }
 
 function freezeResult(

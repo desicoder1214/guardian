@@ -253,6 +253,35 @@ test('BLOCK on CHANNEL_DELETE plans lock, recovery trigger, and actor punishment
   ]);
 });
 
+test('BLOCK on PERMISSION_OVERWRITE_UPDATE plans overwrite restore/removal and actor punishment', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.PERMISSION_OVERWRITE_UPDATE,
+    metadata: {
+      source: 'test',
+      actorId: 'actor-overwrite-1',
+      overwriteId: 'overwrite-1',
+      permissionOverwriteContainmentRequired: true,
+      policy: {
+        punishActor: true,
+      },
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([
+    SecurityActionType.RESTORE_RESOURCE,
+    SecurityActionType.QUARANTINE_ACTOR,
+    SecurityActionType.CREATE_INCIDENT,
+    SecurityActionType.NOTIFY_AUDIT,
+  ]);
+});
+
 test('protected role skips punishment and neutralization actions', () => {
   const planner = new InMemorySecurityActionPlanner();
   const plan = planner.plan({

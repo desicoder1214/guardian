@@ -69,6 +69,7 @@ const SUPPORTED_SCENARIOS = Object.freeze([
   { scenario: 'PRIVILEGED_PERMISSION_ESCALATION', eventName: 'PRIVILEGED_PERMISSION_ESCALATION', expectedActionType: 'ROLE_CREATE' },
   { scenario: 'UNAUTHORIZED_CHANNEL_CREATION', eventName: 'CHANNEL_CREATE', expectedActionType: 'CHANNEL_CREATE' },
   { scenario: 'CHANNEL_PERMISSION_DRIFT', eventName: 'CHANNEL_PERMISSION_DRIFT', expectedActionType: 'CHANNEL_DELETE' },
+  { scenario: 'UNAUTHORIZED_PERMISSION_OVERWRITE', eventName: 'PERMISSION_OVERWRITE_UPDATE', expectedActionType: 'PERMISSION_OVERWRITE_UPDATE' },
 ]);
 
 const FAIL_CLOSED_SCENARIOS = Object.freeze([
@@ -1314,9 +1315,10 @@ describe('IntegratedCanonicalGuardianRuntime channel deletion abuse vertical sli
     await runtime.ingestGatewayEvent(replayEvent);
     await runtime.stop();
 
-    const channelCalls = fetchSpy.mock.calls.filter((call) =>
-      String((call as unknown[])[0] ?? '').includes('/api/v10/channels/channel-dangerous-replay-1'),
-    );
+    const channelCalls = fetchSpy.mock.calls.filter((call) => {
+      const url = String((call as unknown[])[0] ?? '');
+      return url.includes('/api/v10/channels/channel-dangerous-replay-1') && !url.includes('/permissions/');
+    });
     const punishmentCalls = fetchSpy.mock.calls.filter((call) => {
       const url = String((call as unknown[])[0] ?? '');
       return (
@@ -1696,6 +1698,449 @@ describe('IntegratedCanonicalGuardianRuntime channel creation abuse vertical sli
     await runtime.stop();
 
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('IntegratedCanonicalGuardianRuntime permission overwrite abuse vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_AUTHORIZED_OVERWRITE_IDS;
+    delete process.env.GUARDIAN_TRUSTED_CHANNEL_ADMIN_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildPermissionOverwriteEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      t: 'PERMISSION_OVERWRITE_UPDATE',
+      d: {
+        guildId: 'guild-overwrite-slice-1',
+        actorId: 'actor-overwrite-slice-1',
+        channelId: 'channel-overwrite-slice-1',
+        overwriteId: 'overwrite-dangerous-slice-1',
+        targetId: 'overwrite-dangerous-slice-1',
+        resourceId: 'overwrite-dangerous-slice-1',
+        ...overrides,
+      },
+      ts: '2026-07-01T18:00:00.000Z',
+    };
+  }
+
+  test('unauthorized permission overwrite executes overwrite restore/removal and actor punishment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-overwrite-slice-1',
+      'guild-overwrite-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildPermissionOverwriteEvent());
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/channels/channel-overwrite-slice-1/permissions/overwrite-dangerous-slice-1'))).toBe(true);
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-overwrite-slice-1/members/actor-overwrite-slice-1') ||
+          url.includes('/api/v10/guilds/guild-overwrite-slice-1/bans/actor-overwrite-slice-1'),
+      ),
+    ).toBe(true);
+  });
+
+  test('authorized overwrite update performs no containment', async () => {
+    process.env.GUARDIAN_AUTHORIZED_OVERWRITE_IDS = 'overwrite-safe-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-overwrite-slice-2',
+      'guild-overwrite-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildPermissionOverwriteEvent({
+        overwriteId: 'overwrite-safe-1',
+        targetId: 'overwrite-safe-1',
+        resourceId: 'overwrite-safe-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('trusted administrator overwrite update is policy-authorized and performs no containment', async () => {
+    process.env.GUARDIAN_TRUSTED_CHANNEL_ADMIN_IDS = 'trusted-overwrite-admin-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-overwrite-slice-3',
+      'guild-overwrite-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildPermissionOverwriteEvent({
+        actorId: 'trusted-overwrite-admin-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('duplicate/replay overwrite events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-overwrite-slice-4',
+      'guild-overwrite-slice-1',
+    );
+
+    const replayEvent = buildPermissionOverwriteEvent({
+      actorId: 'actor-overwrite-replay-1',
+      overwriteId: 'overwrite-replay-1',
+      targetId: 'overwrite-replay-1',
+      resourceId: 'overwrite-replay-1',
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    const overwriteCalls = fetchSpy.mock.calls.filter((call) =>
+      String((call as unknown[])[0] ?? '').includes('/api/v10/channels/channel-overwrite-slice-1/permissions/overwrite-replay-1'),
+    );
+    expect(overwriteCalls).toHaveLength(1);
+    expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
+  });
+
+  test('missing audit log still performs mandatory overwrite containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-overwrite-slice-5',
+      'guild-overwrite-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildPermissionOverwriteEvent({
+        actorId: 'unknown-actor',
+      }),
+    );
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/channels/channel-overwrite-slice-1/permissions/overwrite-dangerous-slice-1'))).toBe(true);
+  });
+
+  test('delayed attribution uses later audit entry and can punish attributed actor', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-overwrite-slice-6',
+      'guild-overwrite-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildPermissionOverwriteEvent({
+        actorId: 'unknown-actor',
+        overwriteId: 'overwrite-late-audit-1',
+        targetId: 'overwrite-late-audit-1',
+        resourceId: 'overwrite-late-audit-1',
+      }),
+    );
+    await runtime.ingestGatewayEvent(
+      buildPermissionOverwriteEvent({
+        actorId: 'unknown-actor',
+        overwriteId: 'overwrite-late-audit-2',
+        targetId: 'overwrite-late-audit-2',
+        resourceId: 'overwrite-late-audit-2',
+        auditLogEntry: {
+          id: 'audit-overwrite-late-1',
+          actionType: 'PERMISSION_OVERWRITE_UPDATE',
+          actorId: 'actor-overwrite-late-1',
+          targetId: 'overwrite-late-audit-2',
+          resourceId: 'overwrite-late-audit-2',
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-overwrite-slice-1/members/actor-overwrite-late-1') ||
+          url.includes('/api/v10/guilds/guild-overwrite-slice-1/bans/actor-overwrite-late-1'),
+      ),
+    ).toBe(true);
+  });
+
+  test('overwrite 404 is treated as already restored and does not trigger recovery', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/permissions/')) {
+        return {
+          ...createFetchResponse(404),
+          json: async () => Object.freeze({ code: 'UNKNOWN_OVERWRITE', message: 'Unknown Overwrite' }),
+        };
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-overwrite-slice-404',
+      'guild-overwrite-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildPermissionOverwriteEvent());
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).not.toHaveBeenCalled();
+  });
+
+  test.each([403, 429, 500])('overwrite containment failure (%i) triggers recovery scheduling', async (statusCode) => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/permissions/')) {
+        return createFetchResponse(statusCode);
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      `runtime-overwrite-slice-fail-${statusCode}`,
+      'guild-overwrite-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildPermissionOverwriteEvent({
+        actorId: `actor-overwrite-fail-${statusCode}`,
+        overwriteId: `overwrite-fail-${statusCode}`,
+        targetId: `overwrite-fail-${statusCode}`,
+        resourceId: `overwrite-fail-${statusCode}`,
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).toHaveBeenCalled();
+  });
+
+  test('partial execution schedules recovery when overwrite restore fails after punishment succeeds', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/permissions/')) {
+        return createFetchResponse(500);
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-overwrite-slice-partial',
+      'guild-overwrite-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildPermissionOverwriteEvent({
+        overwriteId: 'overwrite-partial-1',
+        targetId: 'overwrite-partial-1',
+        resourceId: 'overwrite-partial-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchSpy.mock.calls.some((call) => String((call as unknown[])[0] ?? '').includes('/permissions/overwrite-partial-1'))).toBe(true);
+    expect(recoverySpy).toHaveBeenCalled();
+  });
+
+  test('simultaneous overwrite changes are contained and actor punishment executes once', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-overwrite-slice-7',
+      'guild-overwrite-slice-1',
+    );
+
+    await runtime.start();
+    await Promise.all([
+      runtime.ingestGatewayEvent(
+        buildPermissionOverwriteEvent({
+          actorId: 'actor-overwrite-burst-1',
+          overwriteId: 'overwrite-burst-1',
+          targetId: 'overwrite-burst-1',
+          resourceId: 'overwrite-burst-1',
+        }),
+      ),
+      runtime.ingestGatewayEvent(
+        buildPermissionOverwriteEvent({
+          actorId: 'actor-overwrite-burst-1',
+          overwriteId: 'overwrite-burst-2',
+          targetId: 'overwrite-burst-2',
+          resourceId: 'overwrite-burst-2',
+        }),
+      ),
+    ]);
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/permissions/overwrite-burst-1'))).toBe(true);
+    expect(urls.some((url) => url.includes('/permissions/overwrite-burst-2'))).toBe(true);
+
+    const punishmentCalls = urls.filter(
+      (url) =>
+        url.includes('/api/v10/guilds/guild-overwrite-slice-1/members/actor-overwrite-burst-1') ||
+        url.includes('/api/v10/guilds/guild-overwrite-slice-1/bans/actor-overwrite-burst-1'),
+    );
+    expect(punishmentCalls).toHaveLength(1);
   });
 });
 
