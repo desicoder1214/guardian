@@ -3517,6 +3517,357 @@ describe('IntegratedCanonicalGuardianRuntime member ban/kick abuse vertical slic
   });
 });
 
+describe('IntegratedCanonicalGuardianRuntime unauthorized emoji/sticker deletion containment vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_AUTHORIZED_EMOJI_IDS;
+    delete process.env.GUARDIAN_AUTHORIZED_STICKER_IDS;
+    delete process.env.GUARDIAN_TRUSTED_MEMBER_ADMIN_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildEmojiStickerDeletionEvent(overrides: Record<string, unknown> = {}) {
+    const eventName = typeof overrides.eventName === 'string' ? overrides.eventName : 'GUILD_EMOJIS_UPDATE';
+    const payload = {
+      guildId: 'guild-emoji-sticker-slice-1',
+      actorId: 'actor-emoji-sticker-slice-1',
+      deletedEmojiIds: ['emoji-deleted-slice-1'],
+      emojiId: 'emoji-deleted-slice-1',
+      targetId: 'emoji-deleted-slice-1',
+      resourceId: 'emoji-deleted-slice-1',
+      ...overrides,
+    };
+
+    delete (payload as { eventName?: unknown }).eventName;
+
+    return {
+      t: eventName,
+      d: payload,
+      ts: '2026-07-03T10:00:00.000Z',
+    };
+  }
+
+  function createRuntime(transport?: CapturingLogTransport) {
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport ?? new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    return new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-emoji-sticker-slice-1',
+      'guild-emoji-sticker-slice-1',
+    );
+  }
+
+  function emojiStickerPunishmentCalls(fetchSpy: jest.Mock, actorId: string): readonly string[] {
+    return fetchSpy.mock.calls
+      .map((call) => String((call as unknown[])[0] ?? ''))
+      .filter(
+        (url) =>
+          url.includes(`/api/v10/guilds/guild-emoji-sticker-slice-1/members/${actorId}`) ||
+          url.includes(`/api/v10/guilds/guild-emoji-sticker-slice-1/bans/${actorId}`),
+      );
+  }
+
+  test('unauthorized emoji deletion executes mandatory rogue actor punishment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildEmojiStickerDeletionEvent({
+        eventName: 'GUILD_EMOJIS_UPDATE',
+        actorId: 'actor-emoji-delete-1',
+        deletedEmojiIds: ['emoji-deleted-1'],
+        emojiId: 'emoji-deleted-1',
+        targetId: 'emoji-deleted-1',
+        resourceId: 'emoji-deleted-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(emojiStickerPunishmentCalls(fetchSpy, 'actor-emoji-delete-1').length).toBeGreaterThan(0);
+  });
+
+  test('authorized emoji deletion performs no containment', async () => {
+    process.env.GUARDIAN_AUTHORIZED_EMOJI_IDS = 'emoji-safe-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildEmojiStickerDeletionEvent({
+        eventName: 'GUILD_EMOJIS_UPDATE',
+        deletedEmojiIds: ['emoji-safe-1'],
+        emojiId: 'emoji-safe-1',
+        targetId: 'emoji-safe-1',
+        resourceId: 'emoji-safe-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('trusted member admin policy is respected for sticker deletion', async () => {
+    process.env.GUARDIAN_TRUSTED_MEMBER_ADMIN_IDS = 'trusted-emoji-admin-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildEmojiStickerDeletionEvent({
+        eventName: 'STICKER_DELETE',
+        actorId: 'trusted-emoji-admin-1',
+        deletedStickerIds: ['sticker-safe-1'],
+        stickerId: 'sticker-safe-1',
+        targetId: 'sticker-safe-1',
+        resourceId: 'sticker-safe-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('duplicate and replay emoji/sticker deletion events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime(transport);
+    const replayEvent = buildEmojiStickerDeletionEvent({
+      eventName: 'GUILD_STICKERS_UPDATE',
+      actorId: 'actor-emoji-replay-1',
+      deletedStickerIds: ['sticker-replay-1'],
+      stickerId: 'sticker-replay-1',
+      targetId: 'sticker-replay-1',
+      resourceId: 'sticker-replay-1',
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    expect(emojiStickerPunishmentCalls(fetchSpy, 'actor-emoji-replay-1')).toHaveLength(1);
+    expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
+  });
+
+  test('missing audit log follows existing policy when actor attribution is unavailable', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildEmojiStickerDeletionEvent({
+        eventName: 'STICKER_DELETE',
+        actorId: 'unknown-actor',
+        deletedStickerIds: ['sticker-no-audit-1'],
+        stickerId: 'sticker-no-audit-1',
+        targetId: 'sticker-no-audit-1',
+        resourceId: 'sticker-no-audit-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('delayed attribution can punish the later attributed actor', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildEmojiStickerDeletionEvent({
+        eventName: 'GUILD_EMOJIS_UPDATE',
+        actorId: 'unknown-actor',
+        deletedEmojiIds: ['emoji-late-audit-1'],
+        emojiId: 'emoji-late-audit-1',
+        targetId: 'emoji-late-audit-1',
+        resourceId: 'emoji-late-audit-1',
+      }),
+    );
+    await runtime.ingestGatewayEvent(
+      buildEmojiStickerDeletionEvent({
+        eventName: 'STICKER_DELETE',
+        actorId: 'unknown-actor',
+        deletedStickerIds: ['sticker-late-audit-1'],
+        stickerId: 'sticker-late-audit-1',
+        targetId: 'sticker-late-audit-1',
+        resourceId: 'sticker-late-audit-1',
+        auditLogEntry: {
+          id: 'audit-emoji-late-1',
+          actionType: 'MEMBER_KICK',
+          actorId: 'actor-emoji-late-audit-1',
+          targetId: 'sticker-late-audit-1',
+          resourceId: 'sticker-late-audit-1',
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+    await runtime.stop();
+
+    expect(emojiStickerPunishmentCalls(fetchSpy, 'actor-emoji-late-audit-1').length).toBeGreaterThan(0);
+  });
+
+  test('emoji/sticker containment 404 is treated as verified containment and does not trigger recovery', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/api/v10/guilds/guild-emoji-sticker-slice-1/members/actor-emoji-404-1')) {
+        return {
+          ...createFetchResponse(404),
+          json: async () => Object.freeze({ code: 'UNKNOWN_MEMBER', message: 'Unknown Member' }),
+        };
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildEmojiStickerDeletionEvent({
+        eventName: 'GUILD_EMOJIS_UPDATE',
+        actorId: 'actor-emoji-404-1',
+        deletedEmojiIds: ['emoji-404-1'],
+        emojiId: 'emoji-404-1',
+        targetId: 'emoji-404-1',
+        resourceId: 'emoji-404-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(recoverySpy).not.toHaveBeenCalled();
+  });
+
+  test.each([403, 429, 500])(
+    'emoji/sticker containment failure (%i) triggers recovery scheduling',
+    async (statusCode) => {
+      const fetchSpy = jest.fn(async (url: string) => {
+        if (url.includes(`/api/v10/guilds/guild-emoji-sticker-slice-1/members/actor-emoji-fail-${statusCode}`)) {
+          return createFetchResponse(statusCode);
+        }
+
+        return createFetchResponse(204);
+      });
+      (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+      const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+      const runtime = createRuntime();
+
+      await runtime.start();
+      await runtime.ingestGatewayEvent(
+        buildEmojiStickerDeletionEvent({
+          eventName: 'STICKER_DELETE',
+          actorId: `actor-emoji-fail-${statusCode}`,
+          deletedStickerIds: [`sticker-fail-${statusCode}`],
+          stickerId: `sticker-fail-${statusCode}`,
+          targetId: `sticker-fail-${statusCode}`,
+          resourceId: `sticker-fail-${statusCode}`,
+        }),
+      );
+      await runtime.stop();
+
+      expect(fetchSpy).toHaveBeenCalled();
+      expect(recoverySpy).toHaveBeenCalled();
+    },
+  );
+
+  test('partial execution schedules recovery when actor moderation fails after incident actions', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/api/v10/guilds/guild-emoji-sticker-slice-1/members/actor-emoji-partial-1')) {
+        return createFetchResponse(500);
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildEmojiStickerDeletionEvent({
+        eventName: 'STICKER_DELETE',
+        actorId: 'actor-emoji-partial-1',
+        deletedStickerIds: ['sticker-partial-1'],
+        stickerId: 'sticker-partial-1',
+        targetId: 'sticker-partial-1',
+        resourceId: 'sticker-partial-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).toHaveBeenCalled();
+  });
+
+  test('simultaneous emoji/sticker deletion burst is coordinated into one actor punishment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await Promise.all([
+      runtime.ingestGatewayEvent(
+        buildEmojiStickerDeletionEvent({
+          eventName: 'GUILD_EMOJIS_UPDATE',
+          actorId: 'actor-emoji-burst-1',
+          deletedEmojiIds: ['emoji-burst-1'],
+          emojiId: 'emoji-burst-1',
+          targetId: 'emoji-burst-1',
+          resourceId: 'emoji-burst-1',
+        }),
+      ),
+      runtime.ingestGatewayEvent(
+        buildEmojiStickerDeletionEvent({
+          eventName: 'STICKER_DELETE',
+          actorId: 'actor-emoji-burst-1',
+          deletedStickerIds: ['sticker-burst-1'],
+          stickerId: 'sticker-burst-1',
+          targetId: 'sticker-burst-1',
+          resourceId: 'sticker-burst-1',
+        }),
+      ),
+    ]);
+    await runtime.stop();
+
+    expect(emojiStickerPunishmentCalls(fetchSpy, 'actor-emoji-burst-1')).toHaveLength(1);
+  });
+});
+
 describe('IntegratedCanonicalGuardianRuntime dangerous role via invite abuse vertical slice', () => {
   const originalEnv = { ...process.env };
   const originalFetch = (globalThis as { fetch?: unknown }).fetch;

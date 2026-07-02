@@ -28,6 +28,7 @@ import { UnauthorizedRoleDeleteDetector } from './discord/unauthorized-role-dele
 import { UnauthorizedRoleCreateDetector } from './discord/unauthorized-role-create-detector';
 import { UnauthorizedPermissionOverwriteDetector } from './discord/unauthorized-permission-overwrite-detector';
 import { UnauthorizedMemberModerationDetector } from './discord/unauthorized-member-moderation-detector';
+import { UnauthorizedEmojiStickerDeletionDetector } from './discord/unauthorized-emoji-sticker-deletion-detector';
 import { DangerousRoleGrantDetector } from './discord/dangerous-role-grant-detector';
 import {
   InMemorySecurityContextBuilder,
@@ -114,6 +115,7 @@ enum EnterpriseOperationalScenario {
   UNAUTHORIZED_PERMISSION_OVERWRITE = 'UNAUTHORIZED_PERMISSION_OVERWRITE',
   UNAUTHORIZED_MEMBER_BAN = 'UNAUTHORIZED_MEMBER_BAN',
   UNAUTHORIZED_MEMBER_KICK = 'UNAUTHORIZED_MEMBER_KICK',
+  UNAUTHORIZED_EMOJI_STICKER_DELETION = 'UNAUTHORIZED_EMOJI_STICKER_DELETION',
   STARTUP_RECONCILIATION_AFTER_DOWNTIME = 'STARTUP_RECONCILIATION_AFTER_DOWNTIME',
   RECOVERY_RESTORATION = 'RECOVERY_RESTORATION',
 }
@@ -282,6 +284,12 @@ function resolveEnterpriseScenarioContract(
           actionType: PolicyActionType.MEMBER_KICK,
           supportedByCanonicalDetectorPath: true,
         });
+      case EnterpriseOperationalScenario.UNAUTHORIZED_EMOJI_STICKER_DELETION:
+        return Object.freeze({
+          scenario: override,
+          actionType: PolicyActionType.MEMBER_KICK,
+          supportedByCanonicalDetectorPath: true,
+        });
       case EnterpriseOperationalScenario.STARTUP_RECONCILIATION_AFTER_DOWNTIME:
         return Object.freeze({
           scenario: override,
@@ -391,6 +399,14 @@ function resolveEnterpriseScenarioContract(
       return Object.freeze({
         scenario: EnterpriseOperationalScenario.UNAUTHORIZED_MEMBER_BAN,
         actionType: PolicyActionType.MEMBER_BAN,
+        supportedByCanonicalDetectorPath: true,
+      });
+    case 'GUILD_EMOJIS_UPDATE':
+    case 'GUILD_STICKERS_UPDATE':
+    case 'STICKER_DELETE':
+      return Object.freeze({
+        scenario: EnterpriseOperationalScenario.UNAUTHORIZED_EMOJI_STICKER_DELETION,
+        actionType: PolicyActionType.MEMBER_KICK,
         supportedByCanonicalDetectorPath: true,
       });
     case 'MEMBER_REMOVE':
@@ -503,6 +519,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private readonly runtimeTrustedRoleAdminIds: readonly string[];
   private readonly runtimeAuthorizedMemberIds: readonly string[];
   private readonly runtimeTrustedMemberAdminIds: readonly string[];
+  private readonly runtimeAuthorizedEmojiIds: readonly string[];
+  private readonly runtimeAuthorizedStickerIds: readonly string[];
   private readonly processedContainmentKeys = new Map<string, number>();
   private readonly processedChannelPunishmentKeys = new Map<string, number>();
   private readonly processedRolePunishmentKeys = new Map<string, number>();
@@ -533,6 +551,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.runtimeTrustedRoleAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_ROLE_ADMIN_IDS');
     this.runtimeAuthorizedMemberIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_MEMBER_IDS');
     this.runtimeTrustedMemberAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_MEMBER_ADMIN_IDS');
+    this.runtimeAuthorizedEmojiIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_EMOJI_IDS');
+    this.runtimeAuthorizedStickerIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_STICKER_IDS');
     this.eventPipeline = new InMemoryDiscordEventPipeline(
       eventBus,
       healthService,
@@ -1332,6 +1352,18 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return Object.freeze([...new Set([...this.runtimeTrustedMemberAdminIds, ...this.trustedInviterIds, ...inline])]);
   }
 
+  private resolveAuthorizedEmojiIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedEmojiIds');
+    return Object.freeze([...new Set([...this.runtimeAuthorizedEmojiIds, ...inline])]);
+  }
+
+  private resolveAuthorizedStickerIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedStickerIds');
+    return Object.freeze([...new Set([...this.runtimeAuthorizedStickerIds, ...inline])]);
+  }
+
   private buildReplaySuppressionKey(
     event: DiscordGatewayNormalizedEvent,
     actionType: PolicyActionType,
@@ -1602,9 +1634,15 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     readonly isAuthorizedActor: boolean;
     readonly isTrustedActor: boolean;
   } {
-    const detectorResult = detectionResults.find(
-      (result) => result.detectorId === 'unauthorized-member-moderation-detector',
-    );
+    const detectorResult =
+      detectionResults.find(
+        (result) => result.detectorId === 'unauthorized-member-moderation-detector' && result.matched,
+      ) ??
+      detectionResults.find(
+        (result) => result.detectorId === 'unauthorized-emoji-sticker-deletion-detector' && result.matched,
+      ) ??
+      detectionResults.find((result) => result.detectorId === 'unauthorized-member-moderation-detector') ??
+      detectionResults.find((result) => result.detectorId === 'unauthorized-emoji-sticker-deletion-detector');
 
     const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
       ? (detectorResult.metadata as Record<string, unknown>)
@@ -1963,6 +2001,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.detectorRegistry.register(new UnauthorizedRoleDeleteDetector());
     this.detectorRegistry.register(new UnauthorizedPermissionOverwriteDetector());
     this.detectorRegistry.register(new UnauthorizedMemberModerationDetector());
+    this.detectorRegistry.register(new UnauthorizedEmojiStickerDeletionDetector());
     this.detectorRegistry.register(new DangerousRoleGrantDetectorPluginAdapter());
     this.detectorRegistry.register(
       new ScenarioContractDetectorPlugin(
@@ -2087,6 +2126,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       case 'GUILD_BAN_ADD':
       case 'MEMBER_BAN':
         return PolicyActionType.MEMBER_BAN;
+      case 'GUILD_EMOJIS_UPDATE':
+      case 'GUILD_STICKERS_UPDATE':
+      case 'STICKER_DELETE':
       case 'MEMBER_REMOVE':
       case 'GUILD_MEMBER_REMOVE':
         return PolicyActionType.MEMBER_KICK;
@@ -2196,6 +2238,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const trustedRoleAdminIds = this.resolveTrustedRoleAdminIds(event.payload);
     const authorizedMemberIds = this.resolveAuthorizedMemberIds(event.payload);
     const trustedMemberAdminIds = this.resolveTrustedMemberAdminIds(event.payload);
+    const authorizedEmojiIds = this.resolveAuthorizedEmojiIds(event.payload);
+    const authorizedStickerIds = this.resolveAuthorizedStickerIds(event.payload);
     this.stageAuditLogEntries(event, actionType);
     const detectionResults = await this.detectionEngine.evaluate(
       Object.freeze({
@@ -2248,6 +2292,14 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           authorizedMemberIds,
           memberModerationAuthorization: Object.freeze({
             authorizedMemberIds,
+            authorizedActorIds: trustedMemberAdminIds,
+            trustedActorIds: trustedMemberAdminIds,
+          }),
+          authorizedEmojiIds,
+          authorizedStickerIds,
+          emojiStickerAuthorization: Object.freeze({
+            authorizedEmojiIds,
+            authorizedStickerIds,
             authorizedActorIds: trustedMemberAdminIds,
             trustedActorIds: trustedMemberAdminIds,
           }),
@@ -2393,7 +2445,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     if (
       (actionType === PolicyActionType.MEMBER_BAN || actionType === PolicyActionType.MEMBER_KICK) &&
       !effectiveDetectionResults.some(
-        (result) => result.detectorId === 'unauthorized-member-moderation-detector' && result.matched,
+        (result) =>
+          (result.detectorId === 'unauthorized-member-moderation-detector' ||
+            result.detectorId === 'unauthorized-emoji-sticker-deletion-detector') &&
+          result.matched,
       )
     ) {
       this.logger.info('Canonical Guardian member moderation containment not required', {
