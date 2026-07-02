@@ -93,6 +93,9 @@ import {
   InMemoryRecoveryEngine,
   RecoveryOperationType,
 } from './recovery/recovery-engine';
+import {
+  buildRecoveryOrchestrationMetadata,
+} from './recovery/recovery-orchestration';
 import { DiscordGatewayNormalizedEvent } from './discord/pipeline-types';
 import {
   AbusedInviteAttributionStatus,
@@ -2895,6 +2898,21 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       return;
     }
 
+    const orchestrationMetadata = buildRecoveryOrchestrationMetadata(
+      containment,
+      correlationId,
+      this.runtimeId,
+    );
+
+    this.logger.warn('Canonical Guardian recovery orchestration scheduled', {
+      correlationId,
+      executionPlanId: containment.executionPlanId,
+      failedActions: containment.failedActions,
+      retryableActions: orchestrationMetadata.retryPlan.retryableActionTypes,
+      actorId: orchestrationMetadata.actorId,
+      shouldRetry: orchestrationMetadata.retryPlan.shouldRetry,
+    });
+
     await this.recoveryEngine.execute(
       Object.freeze({
         recoveryId: `recovery:${containment.executionPlanId}`,
@@ -2906,6 +2924,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         requestedAt: new Date().toISOString(),
         metadata: Object.freeze({
           failedActions: Object.freeze([...containment.failedActions]),
+          succeededActions: Object.freeze([...containment.succeededActions]),
+          skippedDuplicateActions: Object.freeze([...containment.skippedDuplicateActions]),
+          unsupportedActions: Object.freeze([...containment.unsupportedActions]),
+          recoveryOrchestration: orchestrationMetadata,
           runtimeId: this.runtimeId,
         }),
       }),

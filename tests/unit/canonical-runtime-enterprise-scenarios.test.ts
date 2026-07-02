@@ -494,7 +494,13 @@ describe('IntegratedCanonicalGuardianRuntime unauthorized bot vertical slice', (
     expect(decisionModel.metadata?.botId).toBe('bot-unauthorized-5');
   });
 
-  test.each([403, 429, 500])('failures (%i) fail closed and trigger recovery/report path', async (statusCode) => {
+  test.each([
+    [403, false],
+    [429, true],
+    [500, true],
+  ])(
+    'failures (%i) fail closed and trigger recovery/report path',
+    async (statusCode, shouldRetry) => {
     const fetchSpy = jest.fn(async (url: string) => {
       if (url.includes('/members/')) {
         return createFetchResponse(statusCode);
@@ -542,7 +548,29 @@ describe('IntegratedCanonicalGuardianRuntime unauthorized bot vertical slice', (
 
     expect(fetchSpy).toHaveBeenCalled();
     expect(recoverySpy).toHaveBeenCalled();
-  });
+
+    const recoveryRequest = recoverySpy.mock.calls[recoverySpy.mock.calls.length - 1]?.[0] as {
+      correlationId: string;
+      metadata?: {
+        recoveryOrchestration?: {
+          actorId?: string;
+          incidentId: string;
+          retryPlan: { shouldRetry: boolean };
+        };
+      };
+    };
+    expect(recoveryRequest.correlationId).toBeTruthy();
+    expect(recoveryRequest.metadata?.recoveryOrchestration?.incidentId).toBe(
+      recoveryRequest.correlationId,
+    );
+    expect(recoveryRequest.metadata?.recoveryOrchestration?.actorId).toBe(
+      `inviter-fail-${statusCode}`,
+    );
+    expect(recoveryRequest.metadata?.recoveryOrchestration?.retryPlan.shouldRetry).toBe(
+      shouldRetry,
+    );
+  },
+  );
 });
 
 describe('IntegratedCanonicalGuardianRuntime dangerous role grant vertical slice', () => {
