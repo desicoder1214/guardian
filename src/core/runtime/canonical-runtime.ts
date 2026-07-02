@@ -82,6 +82,7 @@ import {
 import {
   ProductionDiscordRestClient,
 } from './discord/production-discord-rest-client';
+import { resolveDiscordBotTokenFromEnvironment } from './discord/auth-token';
 import { DiscordBotExecutor } from './discord/security-bot-executor';
 import { DiscordMemberExecutor } from './discord/security-member-executor';
 import { DiscordRoleExecutor } from './discord/security-role-executor';
@@ -602,6 +603,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       this.logger,
       runtimeManager,
     );
+    this.discordRuntime.setGatewayEventSink?.((event) => this.eventPipeline.ingest(event));
 
     this.executionService = this.resolveExecutionService();
     this.securityEvaluationPipeline = new InMemorySecurityEvaluationPipeline(
@@ -668,8 +670,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
   async start(): Promise<void> {
     await this.runtimeManager.start();
-    await this.discordRuntime.start();
     await this.eventPipeline.start();
+    await this.discordRuntime.start();
 
     if (!this.unsubscribeEventHandler) {
       this.unsubscribeEventHandler = this.eventPipeline.subscribe((event) => this.handleEvent(event));
@@ -688,8 +690,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       this.unsubscribeEventHandler = undefined;
     }
 
-    await this.eventPipeline.stop();
     await this.discordRuntime.stop();
+    await this.eventPipeline.stop();
     await this.runtimeManager.stop();
 
     this.logger.info('Canonical Guardian runtime stopped', {
@@ -800,6 +802,21 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     for (const key of keys) {
       const value = record[key];
       if (typeof value === 'string' && value.trim().length > 0) {
+        return value;
+      }
+    }
+
+    return undefined;
+  }
+
+  private readNumber(record: Record<string, unknown> | undefined, ...keys: string[]): number | undefined {
+    if (!record) {
+      return undefined;
+    }
+
+    for (const key of keys) {
+      const value = record[key];
+      if (typeof value === 'number' && Number.isFinite(value)) {
         return value;
       }
     }
@@ -2301,12 +2318,20 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       });
     }
 
-    const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
+    const botTokenResolution = resolveDiscordBotTokenFromEnvironment();
+    this.logger.info('Discord authentication wiring resolved', {
+      gatewayTokenSource: botTokenResolution.source,
+      restTokenSource: botTokenResolution.source,
+      tokenPresent: botTokenResolution.present,
+      rawTokenLength: botTokenResolution.rawLength,
+      trimmedTokenLength: botTokenResolution.trimmedLength,
+      whitespaceTrimmed: botTokenResolution.whitespaceTrimmed,
+    });
     const restClient = new ProductionDiscordRestClient();
 
     return new ProductionDiscordExecutionAdapter({
       httpClient: restClient,
-      botToken,
+      botToken: botTokenResolution.token,
       apiBaseUrl: process.env.DISCORD_API_BASE_URL ?? 'https://discord.com',
       apiVersion: 10,
     });
@@ -2913,6 +2938,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       shouldRetry: orchestrationMetadata.retryPlan.shouldRetry,
     });
 
+    this.logContainmentExecutionFailures(containment, correlationId);
+
     await this.recoveryEngine.execute(
       Object.freeze({
         recoveryId: `recovery:${containment.executionPlanId}`,
@@ -2932,5 +2959,49 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         }),
       }),
     );
+  }
+
+  private logContainmentExecutionFailures(
+    containment: CoordinatedContainmentExecutionResult,
+    correlationId: string,
+  ): void {
+    const failedActionSet = new Set(containment.failedActions);
+    for (const actionResult of containment.actionResults) {
+      if (!failedActionSet.has(actionResult.actionType)) {
+        continue;
+      }
+
+      const metadata = this.readRecord(actionResult.metadata);
+      const discordExecutionMetadata = this.readRecord(metadata?.discordExecutionMetadata);
+      const discordMetadata = discordExecutionMetadata ?? metadata;
+      const errorMetadata = this.readRecord(discordMetadata?.error);
+      const discordErrorCode = this.readString(errorMetadata, 'code');
+      const discordErrorMessage = this.readString(errorMetadata, 'message') ?? this.readString(metadata, 'reason');
+      const discordErrorCause = this.readString(errorMetadata, 'cause');
+      const operation = this.readString(discordMetadata, 'operation');
+      const idempotencyKey = this.readString(discordMetadata, 'idempotencyKey');
+      const discordExecutionStatus = this.readString(metadata, 'discordExecutionStatus');
+      const discordHttpStatus = this.readNumber(discordMetadata, 'httpStatus', 'statusCode');
+      const retryable = typeof errorMetadata?.retryable === 'boolean' ? errorMetadata.retryable : undefined;
+
+      this.logger.error('Canonical Guardian containment action failed', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId,
+        executionPlanId: containment.executionPlanId,
+        actionType: actionResult.actionType,
+        capability: actionResult.capability,
+        actionCorrelationId: actionResult.correlationId,
+        actionExecutionTimeMs: actionResult.executionTimeMs,
+        discordExecutionStatus,
+        discordOperation: operation,
+        discordHttpStatus,
+        discordErrorCode,
+        discordErrorMessage,
+        discordErrorCause,
+        retryable,
+        idempotencyKey,
+      });
+    }
   }
 }

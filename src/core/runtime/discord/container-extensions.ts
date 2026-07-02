@@ -2,7 +2,8 @@ import { ServiceContainer, ServiceFactory, ServiceIdentifier } from '../../../in
 import { DiscordConfigurationProvider, discordRuntimeConfigSchema } from './config';
 import { DiscordClientAdapter, DiscordRuntimeAdapter } from './types';
 import { DiscordRuntimeLifecycleAdapter } from './adapter';
-import { MockDiscordClientAdapter, TokenValidatingDiscordClientAdapter } from './client';
+import { MockDiscordClientAdapter, ProductionDiscordGatewayClientAdapter } from './client';
+import { resolveDiscordBotTokenFromEnvironment } from './auth-token';
 import { EventBus } from '../../event/bus';
 import { HealthService } from '../health';
 import { LoggerFactory } from '../logger';
@@ -34,8 +35,13 @@ export class DiscordClientAdapterFactory implements ServiceFactory<DiscordClient
 
   create(): DiscordClientAdapter {
     if (isProductionMode(this.mode)) {
-      const botToken = process.env.DISCORD_BOT_TOKEN ?? '';
-      return new TokenValidatingDiscordClientAdapter(botToken);
+      const botToken = resolveDiscordBotTokenFromEnvironment().token;
+
+      return new ProductionDiscordGatewayClientAdapter({
+        botToken,
+        gatewayIntents: process.env.DISCORD_GATEWAY_INTENTS ?? '',
+        guildId: process.env.GUARDIAN_GUILD_ID ?? '',
+      });
     }
 
     return new MockDiscordClientAdapter();

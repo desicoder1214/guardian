@@ -40,6 +40,7 @@ import {
   ProductionDiscordIntegrationRestorationOperation,
   ProductionDiscordIntegrationRestorationOperationOptions,
 } from './discord-integration-restoration-operation';
+import { normalizeDiscordBotToken } from './auth-token';
 
 export interface ProductionDiscordHttpRequest {
   readonly method: string;
@@ -70,6 +71,15 @@ export interface ProductionDiscordExecutionAdapterOptions {
   readonly apiVersion?: number;
   readonly userAgent?: string;
   readonly maxAttempts?: number;
+}
+
+function normalizeExecutionAdapterOptions(
+  options: ProductionDiscordExecutionAdapterOptions,
+): ProductionDiscordExecutionAdapterOptions {
+  return Object.freeze({
+    ...options,
+    botToken: normalizeDiscordBotToken(options.botToken),
+  });
 }
 
 function toOperationOptions(
@@ -271,20 +281,23 @@ export class ProductionDiscordExecutionAdapter implements DiscordExecutionServic
   private readonly delegate: DiscordExecutionService;
 
   constructor(options: ProductionDiscordExecutionAdapterOptions) {
+    const normalizedOptions = normalizeExecutionAdapterOptions(options);
     const memberModerationOperation = new ProductionDiscordMemberModerationOperation(
-      toMemberModerationOperationOptions(options),
+      toMemberModerationOperationOptions(normalizedOptions),
     );
-    const botOperation = new ProductionDiscordBotRemovalOperation(toOperationOptions(options));
-    const roleOperation = new ProductionDiscordRoleRemovalOperation(toRoleOperationOptions(options));
-    const webhookOperation = new ProductionDiscordWebhookRemovalOperation(toWebhookOperationOptions(options));
+    const botOperation = new ProductionDiscordBotRemovalOperation(toOperationOptions(normalizedOptions));
+    const roleOperation = new ProductionDiscordRoleRemovalOperation(toRoleOperationOptions(normalizedOptions));
+    const webhookOperation = new ProductionDiscordWebhookRemovalOperation(
+      toWebhookOperationOptions(normalizedOptions)
+    );
     const channelContainmentOperation = new ProductionDiscordChannelContainmentOperation(
-      toChannelContainmentOperationOptions(options),
+      toChannelContainmentOperationOptions(normalizedOptions),
     );
     const permissionOverwriteOperation = new ProductionDiscordPermissionOverwriteOperation(
-      toPermissionOverwriteOperationOptions(options),
+      toPermissionOverwriteOperationOptions(normalizedOptions),
     );
     const integrationRestorationOperation = new ProductionDiscordIntegrationRestorationOperation(
-      toIntegrationRestorationOperationOptions(options),
+      toIntegrationRestorationOperationOptions(normalizedOptions),
     );
     this.delegate = new ProductionDiscordExecutionService(
       {
@@ -296,7 +309,7 @@ export class ProductionDiscordExecutionAdapter implements DiscordExecutionServic
         permissionOverwriteOperation,
         integrationRestorationOperation,
       },
-      toServiceOptions(options),
+      toServiceOptions(normalizedOptions),
     );
 
     this.member = this.delegate.member;

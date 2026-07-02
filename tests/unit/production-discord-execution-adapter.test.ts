@@ -76,6 +76,28 @@ test('successful execution returns structured success and uses injected HTTP cli
   expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.SUCCESS);
 });
 
+test('REST Authorization header is exactly Bot <trimmed token>', async () => {
+  const calls: Array<{ method: string; url: string; headers: Record<string, string> }> = [];
+  const client: ProductionDiscordHttpClient = {
+    async request(request) {
+      calls.push(request);
+      return response({ status: 204 });
+    },
+  };
+
+  const adapter = createAdapter(client, { botToken: '  test-token  ' });
+
+  await adapter.bot.removeUnauthorizedBot({
+    correlationId: 'corr-trim-1',
+    guildId: 'guild-1',
+    botUserId: 'bot-1',
+    idempotencyKey: 'idem-trim-1',
+  });
+
+  expect(calls).toHaveLength(1);
+  expect(calls[0].headers.Authorization).toBe('Bot test-token');
+});
+
 test('permission denied returns failed result with permission verification outcome', async () => {
   const client: ProductionDiscordHttpClient = {
     async request() {

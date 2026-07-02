@@ -4,6 +4,7 @@ import { EventBus, KernelEvent } from '../../event/bus';
 import { RuntimeEventType } from '../events';
 import { HealthService } from '../health';
 import { Logger } from '../logger';
+import { DiscordGatewayRawEvent } from './pipeline-types';
 
 export interface DiscordRuntimeAdapterOptions {
   readonly client: DiscordClientAdapter;
@@ -15,6 +16,8 @@ export interface DiscordRuntimeAdapterOptions {
 
 export class DiscordRuntimeLifecycleAdapter implements DiscordRuntimeAdapter {
   private state: DiscordRuntimeState = 'disconnected';
+  private gatewayEventSink?: (event: DiscordGatewayRawEvent) => Promise<void>;
+  private clientGatewayUnsubscribe?: () => void;
 
   constructor(private readonly options: DiscordRuntimeAdapterOptions) {}
 
@@ -29,6 +32,7 @@ export class DiscordRuntimeLifecycleAdapter implements DiscordRuntimeAdapter {
 
     try {
       await this.options.client.connect();
+      this.subscribeClientEvents();
       this.setState('connected');
       this.publishEvent(RuntimeEventType.DiscordRuntimeStarted);
       this.options.logger.info('Discord runtime connected');
@@ -51,6 +55,7 @@ export class DiscordRuntimeLifecycleAdapter implements DiscordRuntimeAdapter {
 
     try {
       await this.options.client.disconnect();
+      this.unsubscribeClientEvents();
       this.setState('disconnected');
       this.publishEvent(RuntimeEventType.DiscordRuntimeStopped);
       this.options.logger.info('Discord runtime stopped');
@@ -73,9 +78,11 @@ export class DiscordRuntimeLifecycleAdapter implements DiscordRuntimeAdapter {
     try {
       if (this.options.client.isConnected()) {
         await this.options.client.disconnect();
+        this.unsubscribeClientEvents();
       }
 
       await this.options.client.connect();
+      this.subscribeClientEvents();
       this.setState('connected');
       this.publishEvent(RuntimeEventType.DiscordRuntimeStarted);
       this.options.logger.info('Discord runtime reconnected');
@@ -89,6 +96,10 @@ export class DiscordRuntimeLifecycleAdapter implements DiscordRuntimeAdapter {
 
   getState(): DiscordRuntimeState {
     return this.state;
+  }
+
+  setGatewayEventSink(sink: (event: DiscordGatewayRawEvent) => Promise<void>): void {
+    this.gatewayEventSink = sink;
   }
 
   private setState(state: DiscordRuntimeState): void {
@@ -115,5 +126,43 @@ export class DiscordRuntimeLifecycleAdapter implements DiscordRuntimeAdapter {
 
   private publishError(error: unknown): void {
     this.publishEvent(RuntimeEventType.DiscordRuntimeError, { error });
+  }
+
+  private subscribeClientEvents(): void {
+    if (this.clientGatewayUnsubscribe) {
+      return;
+    }
+
+    this.clientGatewayUnsubscribe = this.options.client.subscribe((event) => {
+      void this.forwardGatewayEvent(event);
+    });
+  }
+
+  private unsubscribeClientEvents(): void {
+    if (!this.clientGatewayUnsubscribe) {
+      return;
+    }
+
+    this.clientGatewayUnsubscribe();
+    this.clientGatewayUnsubscribe = undefined;
+  }
+
+  private async forwardGatewayEvent(event: DiscordGatewayRawEvent): Promise<void> {
+    if (!this.gatewayEventSink) {
+      return;
+    }
+
+    try {
+      await this.gatewayEventSink(event);
+    } catch (error) {
+      this.publishEvent(RuntimeEventType.DiscordGatewayEventDispatchFailed, {
+        eventName: event.t,
+        error,
+      });
+      this.options.logger.error('Discord runtime failed to forward gateway event', {
+        error,
+        event: event.t,
+      });
+    }
   }
 }

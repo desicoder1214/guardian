@@ -200,7 +200,7 @@ describe('IntegratedCanonicalGuardianRuntime unauthorized bot vertical slice', (
 
   beforeEach(() => {
     process.env = { ...originalEnv };
-    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_BOT_TOKEN = '  test-bot-token  ';
     process.env.DISCORD_API_BASE_URL = 'https://discord.com';
     delete process.env.GUARDIAN_TRUSTED_INVITER_IDS;
     delete process.env.GUARDIAN_AUTHORIZED_BOT_IDS;
@@ -259,6 +259,68 @@ describe('IntegratedCanonicalGuardianRuntime unauthorized bot vertical slice', (
     expect(url).toContain('/api/v10/guilds/guild-bot-slice-1/members/bot-unauthorized-1');
     expect(init.method).toBe('DELETE');
     expect(init.headers.Authorization).toBe('Bot test-bot-token');
+
+    const authLog = transport.entries.find(
+      (entry) => entry.level === 'info' && entry.message === 'Discord authentication wiring resolved',
+    );
+    expect(authLog).toBeDefined();
+    expect(authLog?.metadata).toMatchObject({
+      gatewayTokenSource: 'DISCORD_BOT_TOKEN',
+      restTokenSource: 'DISCORD_BOT_TOKEN',
+      tokenPresent: true,
+      rawTokenLength: 18,
+      trimmedTokenLength: 14,
+      whitespaceTrimmed: true,
+    });
+  });
+
+  test('discord.js-style GuildMemberAdd payload routes to REMOVE_UNAUTHORIZED_BOT', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const plannerSpy = jest.spyOn(InMemorySecurityExecutionPlanner.prototype, 'plan');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-bot-slice-shape-1',
+      'guild-bot-slice-shape-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent({
+      t: 'GUILD_MEMBER_ADD',
+      d: {
+        guildId: 'guild-bot-slice-shape-1',
+        actorId: 'inviter-shape-1',
+        userId: 'bot-unauthorized-shape-1',
+        user: {
+          id: 'bot-unauthorized-shape-1',
+          bot: true,
+        },
+      },
+      ts: '2026-07-02T09:00:00.000Z',
+    });
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    const firstCall = fetchSpy.mock.calls[0] as unknown[];
+    const url = firstCall[0] as string;
+    expect(url).toContain('/api/v10/guilds/guild-bot-slice-shape-1/members/bot-unauthorized-shape-1');
+
+    expect(plannerSpy).toHaveBeenCalled();
+    const planCall = plannerSpy.mock.calls[plannerSpy.mock.calls.length - 1];
+    const actionPlan = planCall[0] as { actions: readonly { type: SecurityActionType }[] };
+    expect(actionPlan.actions.some((action) => action.type === SecurityActionType.REMOVE_UNAUTHORIZED_BOT)).toBe(true);
   });
 
   test('authorized bot is not removed', async () => {
@@ -501,6 +563,7 @@ describe('IntegratedCanonicalGuardianRuntime unauthorized bot vertical slice', (
   ])(
     'failures (%i) fail closed and trigger recovery/report path',
     async (statusCode, shouldRetry) => {
+    const transport = new CapturingLogTransport();
     const fetchSpy = jest.fn(async (url: string) => {
       if (url.includes('/members/')) {
         return createFetchResponse(statusCode);
@@ -514,7 +577,7 @@ describe('IntegratedCanonicalGuardianRuntime unauthorized bot vertical slice', (
 
     const eventBus = new InMemoryEventBus();
     const health = new RuntimeHealthService();
-    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const loggerFactory = new LoggerFactory([transport]);
     const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
 
     const runtime = new IntegratedCanonicalGuardianRuntime(
@@ -569,8 +632,32 @@ describe('IntegratedCanonicalGuardianRuntime unauthorized bot vertical slice', (
     expect(recoveryRequest.metadata?.recoveryOrchestration?.retryPlan.shouldRetry).toBe(
       shouldRetry,
     );
+
+    const failureLogs = transport.entries.filter(
+      (entry) => entry.level === 'error' && entry.message === 'Canonical Guardian containment action failed',
+    );
+    expect(failureLogs.length).toBeGreaterThanOrEqual(2);
+
+    const removeUnauthorizedBotFailure = failureLogs.find(
+      (entry) => entry.metadata?.actionType === SecurityActionType.REMOVE_UNAUTHORIZED_BOT,
+    );
+    expect(removeUnauthorizedBotFailure).toBeDefined();
+    expect(removeUnauthorizedBotFailure?.metadata?.discordErrorCode).toBeDefined();
+    expect(removeUnauthorizedBotFailure?.metadata?.discordErrorMessage).toBeDefined();
+    expect(removeUnauthorizedBotFailure?.metadata?.discordHttpStatus).toBe(statusCode);
+
+    const freezeWebhookFailure = failureLogs.find(
+      (entry) => entry.metadata?.actionType === SecurityActionType.FREEZE_WEBHOOKS,
+    );
+    expect(freezeWebhookFailure).toBeDefined();
+    expect(freezeWebhookFailure?.metadata?.discordErrorCode).toBe('VALIDATION_ERROR');
+    expect(freezeWebhookFailure?.metadata?.discordErrorMessage).toContain(
+      'webhookId is required for production execution',
+    );
+    expect(freezeWebhookFailure?.metadata?.discordHttpStatus).toBe(0);
   },
   );
+
 });
 
 describe('IntegratedCanonicalGuardianRuntime dangerous role grant vertical slice', () => {

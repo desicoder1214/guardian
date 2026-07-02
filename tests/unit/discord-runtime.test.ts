@@ -51,6 +51,7 @@ test('Discord runtime adapter publishes error event on failure', async () => {
     },
     disconnect: async () => {},
     isConnected: () => false,
+    subscribe: () => () => undefined,
   };
 
   const adapter = new DiscordRuntimeLifecycleAdapter({
@@ -63,4 +64,31 @@ test('Discord runtime adapter publishes error event on failure', async () => {
 
   await expect(adapter.start()).rejects.toThrow('connect failed');
   expect(adapter.getState()).toBe('disconnected');
+});
+
+test('Discord runtime adapter continues forwarding gateway events after reconnect', async () => {
+  const eventBus = new InMemoryEventBus();
+  const healthService = new RuntimeHealthService();
+  const client = new MockDiscordClientAdapter();
+  const adapter = new DiscordRuntimeLifecycleAdapter({
+    client,
+    config,
+    eventBus,
+    healthService,
+    logger,
+  });
+  const forwarded: string[] = [];
+
+  adapter.setGatewayEventSink(async (event) => {
+    forwarded.push(event.t);
+  });
+
+  await adapter.start();
+  await client.emit({ t: 'READY' });
+
+  await adapter.reconnect();
+  await client.emit({ t: 'GUILD_UPDATE' });
+
+  expect(forwarded).toEqual(['READY', 'GUILD_UPDATE']);
+  await adapter.stop();
 });

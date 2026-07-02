@@ -3,8 +3,8 @@
   "version": "0.5.0",
   "private": true,
   "description": "Guardian security kernel foundation",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/src/index.js",
+  "types": "dist/src/index.d.ts",
   "scripts": {
     "lint": "eslint src tests --ext .ts",
     "format": "prettier --write src tests package.json tsconfig*.json .eslintrc.json jest.config.js .prettierrc",
@@ -12,9 +12,10 @@
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
     "test": "jest --runInBand",
-    "start": "node dist/index.js"
+    "start": "node dist/src/index.js"
   },
   "dependencies": {
+    "discord.js": "^14.26.4",
     "dotenv": "^16.4.5"
   },
   "devDependencies": {

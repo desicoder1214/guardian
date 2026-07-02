@@ -1,7 +1,7 @@
 import { ApplicationBootstrap } from '../../src/core/runtime/bootstrap';
 import { InMemoryDiscordExecutionService } from '../../src/core/runtime/discord/discord-execution-service';
 import { DiscordClientAdapterFactory } from '../../src/core/runtime/discord/container-extensions';
-import { MockDiscordClientAdapter, TokenValidatingDiscordClientAdapter } from '../../src/core/runtime/discord/client';
+import { MockDiscordClientAdapter, ProductionDiscordGatewayClientAdapter } from '../../src/core/runtime/discord/client';
 import { ProductionDiscordExecutionAdapter } from '../../src/core/runtime/discord/production-discord-execution-adapter';
 import { GuardianRuntimeMode } from '../../src/core/runtime/runtime-mode';
 
@@ -28,13 +28,17 @@ function setEnv(overrides: Record<string, string | undefined>): () => void {
   };
 }
 
-test('production mode uses the token-validating client adapter, not the mock adapter', () => {
-  const restoreEnv = setEnv({ DISCORD_BOT_TOKEN: 'unit-test-token' });
+test('production mode uses the gateway client adapter, not the mock adapter', () => {
+  const restoreEnv = setEnv({
+    DISCORD_BOT_TOKEN: 'unit-test-token',
+    DISCORD_GATEWAY_INTENTS: 'GUILDS',
+    GUARDIAN_GUILD_ID: 'guild-unit-test',
+  });
 
   try {
     const adapter = new DiscordClientAdapterFactory(GuardianRuntimeMode.PRODUCTION).create();
 
-    expect(adapter).toBeInstanceOf(TokenValidatingDiscordClientAdapter);
+    expect(adapter).toBeInstanceOf(ProductionDiscordGatewayClientAdapter);
     expect(adapter).not.toBeInstanceOf(MockDiscordClientAdapter);
   } finally {
     restoreEnv();
