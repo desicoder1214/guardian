@@ -13,6 +13,7 @@ import {
   DiscordExecutionResult,
   DiscordExecutionService,
   DiscordExecutionStatus,
+  DiscordIntegrationRestorationExecutionRequest,
   DiscordMemberContainmentExecutionRequest,
   DiscordPermissionOverwriteExecutionRequest,
   DiscordRoleRemovalExecutionRequest,
@@ -389,6 +390,29 @@ function toPermissionOverwriteRequest(request: SecurityDomainExecutionRequest): 
   });
 }
 
+function toIntegrationRequest(request: SecurityDomainExecutionRequest): DiscordIntegrationRestorationExecutionRequest {
+  const metadata = resolveContainmentMetadata(request);
+  return Object.freeze({
+    correlationId: request.correlationId,
+    guildId: readString(metadata, 'guildId', 'guild_id'),
+    integrationId:
+      readString(metadata, 'integrationId', 'integration_id', 'ownerIntegrationId', 'owner_integration_id') ??
+      readString(metadata, 'applicationId', 'application_id', 'appId', 'app_id') ??
+      readString(metadata, 'resourceId', 'resource_id', 'targetId', 'target_id'),
+    applicationId: readString(metadata, 'applicationId', 'application_id', 'appId', 'app_id'),
+    idempotencyKey: resolveExecutionRequestIdempotencyKey(request),
+    reason: 'guardian:restore-integration',
+    metadata: Object.freeze({
+      planId: request.planId,
+      executionPlanId: request.executionPlanId,
+      routeId: request.route.routeId,
+      threatAssessment: metadata.threatAssessment,
+      securityDecision: metadata.securityDecision,
+      authorizationMetadata: metadata.authorizationMetadata,
+    }),
+  });
+}
+
 function toMemberRequest(request: SecurityDomainExecutionRequest): DiscordMemberContainmentExecutionRequest {
   const metadata = resolveContainmentMetadata(request);
 
@@ -594,6 +618,23 @@ export class InMemoryCoordinatedContainmentExecution {
               status: classifyDiscordResult(restoreResult),
               executionTimeMs: Math.max(0, Date.now() - actionStartedAt),
               metadata: freezeMetadata(restoreResult.metadata as Record<string, unknown> | undefined),
+            }),
+          );
+          break;
+        }
+        case SecurityExecutorCapability.REVOKE_ESCALATION_SOURCE: {
+          const integrationResult = await dependencies.discordExecutionService.integration.restoreIntegration(
+            toIntegrationRequest(request),
+          );
+          actionResults.push(
+            freezeActionResult({
+              actionType: intent.route.actionType,
+              sequence: intent.route.sequence,
+              capability: intent.targetedCapability,
+              correlationId: request.correlationId,
+              status: classifyDiscordResult(integrationResult),
+              executionTimeMs: Math.max(0, Date.now() - actionStartedAt),
+              metadata: freezeMetadata(integrationResult.metadata as Record<string, unknown> | undefined),
             }),
           );
           break;

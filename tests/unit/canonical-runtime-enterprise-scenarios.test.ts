@@ -1324,6 +1324,241 @@ describe('IntegratedCanonicalGuardianRuntime webhook creation abuse vertical sli
   });
 });
 
+describe('IntegratedCanonicalGuardianRuntime integration/application management vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_TRUSTED_MEMBER_ADMIN_IDS;
+    delete process.env.GUARDIAN_AUTHORIZED_INTEGRATION_IDS;
+    delete process.env.GUARDIAN_AUTHORIZED_APPLICATION_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildIntegrationCreateEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      t: 'INTEGRATION_CREATE',
+      d: {
+        guildId: 'guild-integration-slice-1',
+        actorId: 'actor-integration-slice-1',
+        integrationId: 'integration-dangerous-slice-1',
+        applicationId: 'application-dangerous-slice-1',
+        ...overrides,
+      },
+      ts: '2026-07-01T16:00:00.000Z',
+    };
+  }
+
+  test('unauthorized integration management executes integration containment and actor punishment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-integration-slice-1',
+      'guild-integration-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildIntegrationCreateEvent());
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/guilds/guild-integration-slice-1/integrations/integration-dangerous-slice-1'))).toBe(true);
+    expect(urls.some((url) => url.includes('/api/v10/guilds/guild-integration-slice-1/members/actor-integration-slice-1'))).toBe(true);
+  });
+
+  test('authorized integration management performs no containment', async () => {
+    process.env.GUARDIAN_AUTHORIZED_INTEGRATION_IDS = 'integration-dangerous-slice-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-integration-slice-2',
+      'guild-integration-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildIntegrationCreateEvent());
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('authorized application management performs no containment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-integration-slice-3',
+      'guild-integration-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildIntegrationCreateEvent({
+        authorizedApplicationIds: ['application-dangerous-slice-1'],
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('trusted administrator exemption suppresses integration containment and punishment', async () => {
+    process.env.GUARDIAN_TRUSTED_MEMBER_ADMIN_IDS = 'trusted-admin-integration-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-integration-slice-4',
+      'guild-integration-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildIntegrationCreateEvent({
+        actorId: 'trusted-admin-integration-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('duplicate/replay integration management events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-integration-slice-5',
+      'guild-integration-slice-1',
+    );
+
+    const replayEvent = buildIntegrationCreateEvent({
+      actorId: 'actor-integration-replay-1',
+      integrationId: 'integration-dangerous-replay-1',
+      applicationId: 'application-dangerous-replay-1',
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    const integrationCalls = fetchSpy.mock.calls.filter((call) =>
+      String((call as unknown[])[0] ?? '').includes('/api/v10/guilds/guild-integration-slice-1/integrations/integration-dangerous-replay-1'),
+    );
+    expect(integrationCalls).toHaveLength(1);
+
+    const replaySuppressedLogs = transport.entries.filter(
+      (entry) => entry.level === 'warn' && entry.message === 'Canonical Guardian replay suppressed',
+    );
+    expect(replaySuppressedLogs.length).toBeGreaterThanOrEqual(1);
+  });
+
+  test('application-only identity routes through integration containment endpoint', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-integration-slice-6',
+      'guild-integration-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      {
+        t: 'APPLICATION_INSTALL',
+        d: {
+          guildId: 'guild-integration-slice-1',
+          actorId: 'actor-integration-slice-1',
+          applicationId: 'application-target-only-1',
+        },
+        ts: '2026-07-01T16:00:30.000Z',
+      },
+    );
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/guilds/guild-integration-slice-1/integrations/application-target-only-1'))).toBe(true);
+  });
+});
+
 describe('IntegratedCanonicalGuardianRuntime channel deletion abuse vertical slice', () => {
   const originalEnv = { ...process.env };
   const originalFetch = (globalThis as { fetch?: unknown }).fetch;

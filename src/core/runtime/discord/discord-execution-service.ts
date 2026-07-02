@@ -81,6 +81,14 @@ export enum DiscordPermissionOverwriteVerificationOutcome {
   UNKNOWN_ERROR = 'UNKNOWN_ERROR',
 }
 
+export enum DiscordIntegrationRestorationVerificationOutcome {
+  SUCCESS = 'SUCCESS',
+  ALREADY_REMOVED = 'ALREADY_REMOVED',
+  PERMISSION_FAILURE = 'PERMISSION_FAILURE',
+  FAILURE = 'FAILURE',
+  UNKNOWN_ERROR = 'UNKNOWN_ERROR',
+}
+
 export interface DiscordBotRemovalExecutionRequest {
   readonly correlationId: string;
   readonly guildId?: string;
@@ -137,6 +145,16 @@ export interface DiscordMemberContainmentExecutionRequest {
   readonly metadata?: Record<string, unknown>;
 }
 
+export interface DiscordIntegrationRestorationExecutionRequest {
+  readonly correlationId: string;
+  readonly guildId?: string;
+  readonly integrationId?: string;
+  readonly applicationId?: string;
+  readonly idempotencyKey?: string;
+  readonly reason?: string;
+  readonly metadata?: Record<string, unknown>;
+}
+
 export interface DiscordBotRemovalOperationRequest {
   readonly correlationId: string;
   readonly guildId: string;
@@ -160,8 +178,38 @@ export interface DiscordBotRemovalOperationResponse {
   readonly metadata?: Record<string, unknown>;
 }
 
+export interface DiscordIntegrationRestorationOperationRequest {
+  readonly correlationId: string;
+  readonly guildId: string;
+  readonly integrationId: string;
+  readonly applicationId?: string;
+  readonly reason?: string;
+}
+
+export interface DiscordIntegrationRestorationOperationResponse {
+  readonly ok: boolean;
+  readonly statusCode: number;
+  readonly rateLimit?: {
+    readonly retryAfterMs?: number;
+    readonly bucketId?: string;
+    readonly global?: boolean;
+  };
+  readonly error?: {
+    readonly code?: string;
+    readonly message: string;
+    readonly retryable?: boolean;
+  };
+  readonly metadata?: Record<string, unknown>;
+}
+
 export interface DiscordBotRemovalOperation {
   removeUnauthorizedBot(request: DiscordBotRemovalOperationRequest): Promise<DiscordBotRemovalOperationResponse>;
+}
+
+export interface DiscordIntegrationRestorationOperation {
+  restoreIntegration(
+    request: DiscordIntegrationRestorationOperationRequest,
+  ): Promise<DiscordIntegrationRestorationOperationResponse>;
 }
 
 export interface DiscordRoleRemovalOperationRequest {
@@ -343,7 +391,9 @@ export interface VanityExecutionService {
 }
 
 export interface IntegrationExecutionService {
-  restoreIntegration(correlationId: string): Promise<DiscordExecutionResult>;
+  restoreIntegration(
+    request: string | DiscordIntegrationRestorationExecutionRequest,
+  ): Promise<DiscordExecutionResult>;
 }
 
 export interface BotExecutionService {
@@ -383,6 +433,7 @@ export interface ProductionDiscordExecutionServiceDependencies {
   readonly webhookRemovalOperation?: DiscordWebhookRemovalOperation;
   readonly channelContainmentOperation?: DiscordChannelContainmentOperation;
   readonly permissionOverwriteOperation?: DiscordPermissionOverwriteOperation;
+  readonly integrationRestorationOperation?: DiscordIntegrationRestorationOperation;
 }
 
 interface FrozenExecutionMetadata {
@@ -391,7 +442,8 @@ interface FrozenExecutionMetadata {
     | 'REMOVE_DANGEROUS_ROLE'
     | 'REMOVE_DANGEROUS_WEBHOOK'
     | 'LOCK_CHANNELS'
-    | 'RESTORE_PERMISSION_OVERWRITE';
+    | 'RESTORE_PERMISSION_OVERWRITE'
+    | 'RESTORE_INTEGRATION';
   readonly idempotencyKey: string;
   readonly httpStatus: number;
   readonly verification: {
@@ -400,7 +452,8 @@ interface FrozenExecutionMetadata {
       | DiscordRoleRemovalVerificationOutcome
         | DiscordWebhookRemovalVerificationOutcome
         | DiscordChannelContainmentVerificationOutcome
-        | DiscordPermissionOverwriteVerificationOutcome;
+        | DiscordPermissionOverwriteVerificationOutcome
+        | DiscordIntegrationRestorationVerificationOutcome;
   };
   readonly duplicate?: boolean;
   readonly retry: DiscordExecutionRetryMetadata;
@@ -477,14 +530,16 @@ function freezeVerification(metadata: {
     | DiscordRoleRemovalVerificationOutcome
     | DiscordWebhookRemovalVerificationOutcome
     | DiscordChannelContainmentVerificationOutcome
-    | DiscordPermissionOverwriteVerificationOutcome;
+    | DiscordPermissionOverwriteVerificationOutcome
+    | DiscordIntegrationRestorationVerificationOutcome;
 }): {
   readonly outcome:
     | DiscordBotRemovalVerificationOutcome
     | DiscordRoleRemovalVerificationOutcome
     | DiscordWebhookRemovalVerificationOutcome
     | DiscordChannelContainmentVerificationOutcome
-    | DiscordPermissionOverwriteVerificationOutcome;
+    | DiscordPermissionOverwriteVerificationOutcome
+    | DiscordIntegrationRestorationVerificationOutcome;
 } {
   return Object.freeze({ outcome: metadata.outcome });
 }
@@ -541,6 +596,24 @@ function coerceWebhookRequest(request: string | DiscordWebhookRemovalExecutionRe
     correlationId: request.correlationId,
     guildId: request.guildId,
     webhookId: request.webhookId,
+    idempotencyKey: request.idempotencyKey,
+    reason: request.reason,
+    metadata: freezeMetadata(request.metadata),
+  });
+}
+
+function coerceIntegrationRequest(
+  request: string | DiscordIntegrationRestorationExecutionRequest,
+): DiscordIntegrationRestorationExecutionRequest {
+  if (typeof request === 'string') {
+    return Object.freeze({ correlationId: request, idempotencyKey: request });
+  }
+
+  return Object.freeze({
+    correlationId: request.correlationId,
+    guildId: request.guildId,
+    integrationId: request.integrationId,
+    applicationId: request.applicationId,
     idempotencyKey: request.idempotencyKey,
     reason: request.reason,
     metadata: freezeMetadata(request.metadata),
@@ -842,7 +915,8 @@ class InMemoryVanityExecutionService extends BaseInMemoryExecutionService implem
 }
 
 class InMemoryIntegrationExecutionService extends BaseInMemoryExecutionService implements IntegrationExecutionService {
-  async restoreIntegration(correlationId: string): Promise<DiscordExecutionResult> {
+  async restoreIntegration(request: string | DiscordIntegrationRestorationExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
     return this.buildResult('integration', 'restoreIntegration', correlationId);
   }
 }
@@ -953,7 +1027,8 @@ class UnsupportedVanityExecutionService implements VanityExecutionService {
 }
 
 class UnsupportedIntegrationExecutionService implements IntegrationExecutionService {
-  async restoreIntegration(correlationId: string): Promise<DiscordExecutionResult> {
+  async restoreIntegration(request: string | DiscordIntegrationRestorationExecutionRequest): Promise<DiscordExecutionResult> {
+    const correlationId = typeof request === 'string' ? request : request.correlationId;
     return unsupportedResult('integration', 'restoreIntegration', correlationId);
   }
 }
@@ -970,6 +1045,208 @@ function unsupportedResult(service: string, operation: string, correlationId: st
       operation,
     }),
   });
+}
+
+export class ProductionDiscordIntegrationExecutionService implements IntegrationExecutionService {
+  private readonly completedByIdempotencyKey = new Map<string, DiscordExecutionResult>();
+  private readonly maxAttempts: number;
+
+  constructor(
+    private readonly operation: DiscordIntegrationRestorationOperation,
+    options: ProductionDiscordExecutionServiceOptions = {},
+  ) {
+    const merged = { ...DEFAULT_PRODUCTION_OPTIONS, ...options };
+    this.maxAttempts = Math.max(1, Math.floor(merged.maxAttempts));
+  }
+
+  async restoreIntegration(
+    request: string | DiscordIntegrationRestorationExecutionRequest,
+  ): Promise<DiscordExecutionResult> {
+    const normalizedRequest = coerceIntegrationRequest(request);
+    const idempotencyKey = normalizedRequest.idempotencyKey ?? normalizedRequest.correlationId;
+    const cached = this.completedByIdempotencyKey.get(idempotencyKey);
+    if (cached) {
+      const metadata = cached.metadata as FrozenExecutionMetadata | undefined;
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.SKIPPED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'RESTORE_INTEGRATION',
+          idempotencyKey,
+          httpStatus: metadata?.httpStatus ?? 200,
+          verification: {
+            outcome: metadata?.verification?.outcome ?? DiscordIntegrationRestorationVerificationOutcome.SUCCESS,
+          },
+          duplicate: true,
+          retry: metadata?.retry ?? {
+            bounded: true,
+            attemptCount: 1,
+            maxAttempts: this.maxAttempts,
+            exhausted: false,
+          },
+          rateLimit: metadata?.rateLimit ?? { limited: false },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    if (!normalizedRequest.guildId || !normalizedRequest.integrationId) {
+      return freezeExecutionResult({
+        status: DiscordExecutionStatus.FAILED,
+        executionTimeMs: 0,
+        correlationId: normalizedRequest.correlationId,
+        metadata: {
+          operation: 'RESTORE_INTEGRATION',
+          idempotencyKey,
+          httpStatus: 0,
+          verification: { outcome: DiscordIntegrationRestorationVerificationOutcome.FAILURE },
+          retry: {
+            bounded: true,
+            attemptCount: 0,
+            maxAttempts: this.maxAttempts,
+            exhausted: true,
+          },
+          rateLimit: { limited: false },
+          error: {
+            code: DiscordExecutionErrorCode.VALIDATION_ERROR,
+            message: 'guildId and integrationId are required for production execution',
+            retryable: false,
+          },
+          metadata: normalizedRequest.metadata,
+        },
+      });
+    }
+
+    let attemptCount = 0;
+    const startedAt = nowMs();
+    let lastFailure: DiscordIntegrationRestorationOperationResponse | undefined;
+    let lastFailureCause: unknown;
+
+    while (attemptCount < this.maxAttempts) {
+      attemptCount += 1;
+      try {
+        const response = await this.operation.restoreIntegration({
+          correlationId: normalizedRequest.correlationId,
+          guildId: normalizedRequest.guildId,
+          integrationId: normalizedRequest.integrationId,
+          applicationId: normalizedRequest.applicationId,
+          reason: normalizedRequest.reason,
+        });
+
+        if (response.ok || response.statusCode === 404) {
+          const verificationOutcome = response.statusCode === 404
+            ? DiscordIntegrationRestorationVerificationOutcome.ALREADY_REMOVED
+            : DiscordIntegrationRestorationVerificationOutcome.SUCCESS;
+
+          const successResult = freezeExecutionResult({
+            status: DiscordExecutionStatus.SUCCESS,
+            executionTimeMs: Math.max(0, nowMs() - startedAt),
+            correlationId: normalizedRequest.correlationId,
+            metadata: {
+              operation: 'RESTORE_INTEGRATION',
+              idempotencyKey,
+              httpStatus: response.statusCode,
+              verification: {
+                outcome: verificationOutcome,
+              },
+              retry: {
+                bounded: true,
+                attemptCount,
+                maxAttempts: this.maxAttempts,
+                exhausted: false,
+              },
+              rateLimit: {
+                limited: false,
+                retryAfterMs: response.rateLimit?.retryAfterMs,
+                bucketId: response.rateLimit?.bucketId,
+                global: response.rateLimit?.global,
+              },
+              metadata: Object.freeze({
+                guildId: normalizedRequest.guildId,
+                integrationId: normalizedRequest.integrationId,
+                applicationId: normalizedRequest.applicationId,
+                statusCode: response.statusCode,
+                ...response.metadata,
+                ...normalizedRequest.metadata,
+              }),
+            },
+          });
+          this.completedByIdempotencyKey.set(idempotencyKey, successResult);
+          return successResult;
+        }
+
+        lastFailure = response;
+        const isRetryable = Boolean(response.error?.retryable) || response.statusCode === 429;
+        if (!isRetryable) {
+          break;
+        }
+      } catch (error) {
+        lastFailureCause = error;
+      }
+    }
+
+    const failureCode = lastFailure?.error?.code ??
+      (lastFailure?.statusCode === 403
+        ? DiscordExecutionErrorCode.API_ERROR
+        : lastFailure?.statusCode === 429
+          ? DiscordExecutionErrorCode.RATE_LIMITED
+          : lastFailure?.statusCode && lastFailure.statusCode >= 500
+            ? DiscordExecutionErrorCode.NETWORK_ERROR
+            : lastFailureCause !== undefined
+              ? DiscordExecutionErrorCode.UNKNOWN_ERROR
+              : DiscordExecutionErrorCode.UNKNOWN_ERROR);
+    const failureMessage = lastFailure?.error?.message ?? parseFailureCause(lastFailureCause);
+    const permissionFailure = lastFailure?.statusCode === 403 || lastFailure?.error?.code === 'PERMISSION_DENIED';
+    const verificationOutcome = permissionFailure
+      ? DiscordIntegrationRestorationVerificationOutcome.PERMISSION_FAILURE
+      : failureCode === DiscordExecutionErrorCode.UNKNOWN_ERROR
+        ? DiscordIntegrationRestorationVerificationOutcome.UNKNOWN_ERROR
+        : DiscordIntegrationRestorationVerificationOutcome.FAILURE;
+    const retryable =
+      lastFailure?.error?.retryable ??
+      (failureCode === DiscordExecutionErrorCode.RATE_LIMITED || failureCode === DiscordExecutionErrorCode.NETWORK_ERROR);
+
+    return freezeExecutionResult({
+      status: DiscordExecutionStatus.FAILED,
+      executionTimeMs: Math.max(0, nowMs() - startedAt),
+      correlationId: normalizedRequest.correlationId,
+      metadata: {
+        operation: 'RESTORE_INTEGRATION',
+        idempotencyKey,
+        httpStatus: lastFailure?.statusCode ?? 0,
+        verification: {
+          outcome: verificationOutcome,
+        },
+        retry: {
+          bounded: true,
+          attemptCount,
+          maxAttempts: this.maxAttempts,
+          exhausted: true,
+        },
+        rateLimit: {
+          limited: failureCode === DiscordExecutionErrorCode.RATE_LIMITED,
+          retryAfterMs: lastFailure?.rateLimit?.retryAfterMs,
+          bucketId: lastFailure?.rateLimit?.bucketId,
+          global: lastFailure?.rateLimit?.global,
+        },
+        error: {
+          code: failureCode,
+          message: failureMessage,
+          retryable,
+          cause: lastFailureCause !== undefined ? parseFailureCause(lastFailureCause) : undefined,
+        },
+        metadata: Object.freeze({
+          guildId: normalizedRequest.guildId,
+          integrationId: normalizedRequest.integrationId,
+          applicationId: normalizedRequest.applicationId,
+          statusCode: lastFailure?.statusCode,
+          ...lastFailure?.metadata,
+          ...normalizedRequest.metadata,
+        }),
+      },
+    });
+  }
 }
 
 export class ProductionDiscordBotExecutionService implements BotExecutionService {
@@ -2159,7 +2436,7 @@ export class ProductionDiscordExecutionService implements DiscordExecutionServic
   readonly guild: GuildExecutionService = new UnsupportedGuildExecutionService();
   readonly emoji: EmojiExecutionService = new UnsupportedEmojiExecutionService();
   readonly vanity: VanityExecutionService = new UnsupportedVanityExecutionService();
-  readonly integration: IntegrationExecutionService = new UnsupportedIntegrationExecutionService();
+  readonly integration: IntegrationExecutionService;
   readonly bot: BotExecutionService;
 
   constructor(
@@ -2190,6 +2467,9 @@ export class ProductionDiscordExecutionService implements DiscordExecutionServic
     this.webhook = dependencies.webhookRemovalOperation
       ? new ProductionDiscordWebhookExecutionService(dependencies.webhookRemovalOperation, options)
       : new UnsupportedWebhookExecutionService();
+    this.integration = dependencies.integrationRestorationOperation
+      ? new ProductionDiscordIntegrationExecutionService(dependencies.integrationRestorationOperation, options)
+      : new UnsupportedIntegrationExecutionService();
   }
 }
 

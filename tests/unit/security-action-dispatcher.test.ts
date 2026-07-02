@@ -142,8 +142,9 @@ function buildService(spy: { calls: string[] }): DiscordExecutionService {
   };
 
   const integration: IntegrationExecutionService = {
-    restoreIntegration: async (correlationId) => {
+    restoreIntegration: async (request) => {
       spy.calls.push('integration.restoreIntegration');
+      const correlationId = typeof request === 'string' ? request : request.correlationId;
       return result(correlationId, 'integration.restoreIntegration');
     },
   };

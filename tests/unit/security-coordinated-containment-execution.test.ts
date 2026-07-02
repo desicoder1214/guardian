@@ -131,7 +131,8 @@ function buildPlannedActions(): readonly SecurityAction[] {
     Object.freeze({ type: SecurityActionType.FREEZE_WEBHOOKS, priority: SecurityActionPriority.HIGH, sequence: 3 }),
     Object.freeze({ type: SecurityActionType.LOCK_CHANNELS, priority: SecurityActionPriority.HIGH, sequence: 4 }),
     Object.freeze({ type: SecurityActionType.RESTORE_RESOURCE, priority: SecurityActionPriority.HIGH, sequence: 5 }),
-    Object.freeze({ type: SecurityActionType.CREATE_INCIDENT, priority: SecurityActionPriority.NORMAL, sequence: 6 }),
+    Object.freeze({ type: SecurityActionType.REVOKE_ESCALATION_SOURCE, priority: SecurityActionPriority.HIGH, sequence: 6 }),
+    Object.freeze({ type: SecurityActionType.CREATE_INCIDENT, priority: SecurityActionPriority.NORMAL, sequence: 7 }),
   ]);
 }
 
@@ -142,7 +143,8 @@ function buildAuthorizationRequirements(): readonly ExecutionAuthorizationRequir
     Object.freeze({ actionType: SecurityActionType.FREEZE_WEBHOOKS, sequence: 3, requiresAuthorization: true, decision: SecurityDecision.BLOCK, correlationId: 'corr-coord-1' }),
     Object.freeze({ actionType: SecurityActionType.LOCK_CHANNELS, sequence: 4, requiresAuthorization: true, decision: SecurityDecision.BLOCK, correlationId: 'corr-coord-1' }),
     Object.freeze({ actionType: SecurityActionType.RESTORE_RESOURCE, sequence: 5, requiresAuthorization: true, decision: SecurityDecision.BLOCK, correlationId: 'corr-coord-1' }),
-    Object.freeze({ actionType: SecurityActionType.CREATE_INCIDENT, sequence: 6, requiresAuthorization: false, decision: SecurityDecision.BLOCK, correlationId: 'corr-coord-1' }),
+    Object.freeze({ actionType: SecurityActionType.REVOKE_ESCALATION_SOURCE, sequence: 6, requiresAuthorization: true, decision: SecurityDecision.BLOCK, correlationId: 'corr-coord-1' }),
+    Object.freeze({ actionType: SecurityActionType.CREATE_INCIDENT, sequence: 7, requiresAuthorization: false, decision: SecurityDecision.BLOCK, correlationId: 'corr-coord-1' }),
   ]);
 }
 
@@ -150,7 +152,7 @@ function buildExecutionPlan(): SecurityExecutionPlan {
   const executionMetadata: SecurityExecutionMetadata = Object.freeze({
     source: 'in-memory-security-execution-planner',
     planId: 'execution-plan:corr-coord-1:BLOCK',
-    plannedActionCount: 6,
+    plannedActionCount: 7,
     plannedActionTypes: Object.freeze(buildPlannedActions().map((action) => action.type)),
   });
 
@@ -263,11 +265,26 @@ class DeterministicContainmentHotPathPlanner implements SecurityHotPathPlanner {
         authorizationRequirement: authorizationRequirements[4],
       }),
       Object.freeze({
-        actionType: SecurityActionType.CREATE_INCIDENT,
+        actionType: SecurityActionType.REVOKE_ESCALATION_SOURCE,
         sequence: 6,
+        priority: SecurityHotPathPriority.HIGH_CONTAINMENT,
+        lane: SecurityHotPathExecutionLane.IMMEDIATE,
+        action: executionPlan.plannedActions[5],
+        containmentTarget: Object.freeze({
+          resourceType: SecurityResourceType.GUILD_CONFIGURATION,
+          resourceId: 'integration-1',
+          correlationId: executionPlan.correlationId,
+          metadata: Object.freeze({ guildId: 'guild-coord-1', integrationId: 'integration-1', applicationId: 'application-1' }),
+        }),
+        containmentStrategy: SecurityContainmentStrategy.REMOVE,
+        authorizationRequirement: authorizationRequirements[5],
+      }),
+      Object.freeze({
+        actionType: SecurityActionType.CREATE_INCIDENT,
+        sequence: 7,
         priority: SecurityHotPathPriority.DEFERRED_AUDIT,
         lane: SecurityHotPathExecutionLane.BACKGROUND,
-        action: executionPlan.plannedActions[5],
+        action: executionPlan.plannedActions[6],
         containmentTarget: Object.freeze({
           resourceType: SecurityResourceType.GUILD_CONFIGURATION,
           resourceId: 'guild-state',
@@ -275,7 +292,7 @@ class DeterministicContainmentHotPathPlanner implements SecurityHotPathPlanner {
           metadata: Object.freeze({ guildId: 'guild-coord-1' }),
         }),
         containmentStrategy: SecurityContainmentStrategy.OBSERVE,
-        authorizationRequirement: authorizationRequirements[5],
+        authorizationRequirement: authorizationRequirements[6],
       }),
     ]);
 
@@ -329,6 +346,7 @@ function createOrchestratorAndAdapter(client: ProductionDiscordHttpClient): {
   actionRegistry.register(new StubRouterActionExecutor(SecurityActionType.FREEZE_WEBHOOKS));
   actionRegistry.register(new StubRouterActionExecutor(SecurityActionType.LOCK_CHANNELS));
   actionRegistry.register(new StubRouterActionExecutor(SecurityActionType.RESTORE_RESOURCE));
+  actionRegistry.register(new StubRouterActionExecutor(SecurityActionType.REVOKE_ESCALATION_SOURCE));
   actionRegistry.register(new StubRouterActionExecutor(SecurityActionType.CREATE_INCIDENT));
 
   const adapter = new ProductionDiscordExecutionAdapter({
@@ -371,6 +389,10 @@ function classifyRequest(request: ProductionDiscordHttpRequest): SecurityActionT
     return SecurityActionType.REMOVE_DANGEROUS_ROLE;
   }
 
+  if (request.method === 'DELETE' && request.url.includes('/integrations/')) {
+    return SecurityActionType.REVOKE_ESCALATION_SOURCE;
+  }
+
   return SecurityActionType.REMOVE_UNAUTHORIZED_BOT;
 }
 
@@ -401,6 +423,7 @@ test('ordered coordinated containment executes immediate actions before backgrou
     SecurityActionType.FREEZE_WEBHOOKS,
     SecurityActionType.LOCK_CHANNELS,
     SecurityActionType.RESTORE_RESOURCE,
+    SecurityActionType.REVOKE_ESCALATION_SOURCE,
   ]);
 
   expect(result.correlationId).toBe('corr-coord-1');
@@ -415,6 +438,7 @@ test('ordered coordinated containment executes immediate actions before backgrou
     SecurityActionType.FREEZE_WEBHOOKS,
     SecurityActionType.LOCK_CHANNELS,
     SecurityActionType.RESTORE_RESOURCE,
+    SecurityActionType.REVOKE_ESCALATION_SOURCE,
   ]);
 
   const requestByActionType = new Map<SecurityActionType, ProductionDiscordHttpRequest>();
@@ -436,6 +460,9 @@ test('ordered coordinated containment executes immediate actions before backgrou
   );
   expect(requestByActionType.get(SecurityActionType.RESTORE_RESOURCE)?.url).toBe(
     'https://discord.example/api/v10/channels/channel-1/permissions/overwrite-1',
+  );
+  expect(requestByActionType.get(SecurityActionType.REVOKE_ESCALATION_SOURCE)?.url).toBe(
+    'https://discord.example/api/v10/guilds/guild-coord-1/integrations/integration-1',
   );
 
   for (const item of result.actionResults.filter((entry) => entry.status === CoordinatedContainmentActionStatus.SUCCEEDED)) {
@@ -490,10 +517,11 @@ test('duplicate coordinated containment execution is idempotently skipped', asyn
     SecurityActionType.FREEZE_WEBHOOKS,
     SecurityActionType.LOCK_CHANNELS,
     SecurityActionType.RESTORE_RESOURCE,
+    SecurityActionType.REVOKE_ESCALATION_SOURCE,
   ]);
   expect(second.failedActions).toEqual([]);
   expect(second.unsupportedActions).toEqual([SecurityActionType.CREATE_INCIDENT]);
-  expect(callOrder).toHaveLength(5);
+  expect(callOrder).toHaveLength(6);
 });
 
 test('partial failures and unsupported actions are reported without corrupting aggregate result', async () => {
@@ -523,6 +551,7 @@ test('partial failures and unsupported actions are reported without corrupting a
     SecurityActionType.FREEZE_WEBHOOKS,
     SecurityActionType.LOCK_CHANNELS,
     SecurityActionType.RESTORE_RESOURCE,
+    SecurityActionType.REVOKE_ESCALATION_SOURCE,
   ]);
   expect(result.unsupportedActions).toEqual([SecurityActionType.CREATE_INCIDENT]);
   expect(result.actionResults.find((item) => item.actionType === SecurityActionType.REMOVE_DANGEROUS_ROLE)?.status).toBe(

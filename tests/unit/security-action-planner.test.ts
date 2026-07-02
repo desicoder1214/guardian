@@ -224,6 +224,55 @@ test('BLOCK on WEBHOOK_CREATE plans mandatory containment and policy-driven puni
   ]);
 });
 
+test('BLOCK on INTEGRATION_MANAGEMENT plans escalation-source revoke and policy-driven actions', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.INTEGRATION_MANAGEMENT,
+    metadata: {
+      source: 'test',
+      actorId: 'actor-integration-1',
+      integrationId: 'integration-1',
+      applicationId: 'application-1',
+      policy: {
+        punishActor: true,
+      },
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([
+    SecurityActionType.REVOKE_ESCALATION_SOURCE,
+    SecurityActionType.QUARANTINE_ACTOR,
+    SecurityActionType.CREATE_INCIDENT,
+    SecurityActionType.NOTIFY_AUDIT,
+  ]);
+});
+
+test('INTEGRATION_MANAGEMENT containment can be disabled by policy metadata', () => {
+  const planner = new InMemorySecurityActionPlanner();
+  const plan = planner.plan({
+    ...buildDecision(SecurityDecision.BLOCK),
+    actionType: SecurityEventActionType.INTEGRATION_MANAGEMENT,
+    metadata: {
+      source: 'test',
+      actorId: 'actor-integration-2',
+      integrationContainmentRequired: false,
+      threatAssessment: buildThreatAssessment(
+        DetectionDisposition.MALICIOUS,
+        DetectionSeverity.CRITICAL,
+        DetectionConfidence.CERTAIN,
+      ),
+    },
+  });
+
+  expect(plan.actions.map((action) => action.type)).toEqual([SecurityActionType.NONE]);
+});
+
 test('BLOCK on CHANNEL_DELETE plans lock, recovery trigger, and actor punishment once policy allows it', () => {
   const planner = new InMemorySecurityActionPlanner();
   const plan = planner.plan({

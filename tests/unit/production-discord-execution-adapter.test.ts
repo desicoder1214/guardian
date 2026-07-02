@@ -343,3 +343,40 @@ test('unknown failure classification is surfaced when upstream returns UNKNOWN_E
   expect(metadata.verification.outcome).toBe(DiscordBotRemovalVerificationOutcome.UNKNOWN_ERROR);
   expect(metadata.error.code).toBe(DiscordExecutionErrorCode.UNKNOWN_ERROR);
 });
+
+test('integration restoration executes DELETE integration endpoint and returns success', async () => {
+  const calls: Array<{ method: string; url: string; headers: Record<string, string> }> = [];
+  const client: ProductionDiscordHttpClient = {
+    async request(request) {
+      calls.push(request);
+      return response({ status: 204 });
+    },
+  };
+
+  const adapter = createAdapter(client, { apiBaseUrl: 'https://discord.example', apiVersion: 10 });
+  const result = await adapter.integration.restoreIntegration({
+    correlationId: 'corr-integration-success-1',
+    guildId: 'guild-1',
+    integrationId: 'integration-1',
+    applicationId: 'application-1',
+    idempotencyKey: 'idem-integration-success-1',
+    reason: 'guardian integration containment',
+  });
+
+  expect(calls).toHaveLength(1);
+  expect(calls[0].method).toBe('DELETE');
+  expect(calls[0].url).toBe('https://discord.example/api/v10/guilds/guild-1/integrations/integration-1');
+  expect(calls[0].headers.Authorization).toBe('Bot test-token');
+  expect(result.status).toBe(DiscordExecutionStatus.SUCCESS);
+
+  const metadata = result.metadata as {
+    operation: string;
+    idempotencyKey: string;
+    httpStatus: number;
+    verification: { outcome: string };
+  };
+  expect(metadata.operation).toBe('RESTORE_INTEGRATION');
+  expect(metadata.idempotencyKey).toBe('idem-integration-success-1');
+  expect(metadata.httpStatus).toBe(204);
+  expect(metadata.verification.outcome).toBe('SUCCESS');
+});

@@ -29,6 +29,7 @@ import { UnauthorizedRoleCreateDetector } from './discord/unauthorized-role-crea
 import { UnauthorizedPermissionOverwriteDetector } from './discord/unauthorized-permission-overwrite-detector';
 import { UnauthorizedMemberModerationDetector } from './discord/unauthorized-member-moderation-detector';
 import { UnauthorizedEmojiStickerDeletionDetector } from './discord/unauthorized-emoji-sticker-deletion-detector';
+import { UnauthorizedIntegrationManagementDetector } from './discord/unauthorized-integration-management-detector';
 import { DangerousRoleGrantDetector } from './discord/dangerous-role-grant-detector';
 import {
   InMemorySecurityContextBuilder,
@@ -116,6 +117,7 @@ enum EnterpriseOperationalScenario {
   UNAUTHORIZED_MEMBER_BAN = 'UNAUTHORIZED_MEMBER_BAN',
   UNAUTHORIZED_MEMBER_KICK = 'UNAUTHORIZED_MEMBER_KICK',
   UNAUTHORIZED_EMOJI_STICKER_DELETION = 'UNAUTHORIZED_EMOJI_STICKER_DELETION',
+  UNAUTHORIZED_INTEGRATION_APPLICATION_MANAGEMENT = 'UNAUTHORIZED_INTEGRATION_APPLICATION_MANAGEMENT',
   STARTUP_RECONCILIATION_AFTER_DOWNTIME = 'STARTUP_RECONCILIATION_AFTER_DOWNTIME',
   RECOVERY_RESTORATION = 'RECOVERY_RESTORATION',
 }
@@ -290,6 +292,12 @@ function resolveEnterpriseScenarioContract(
           actionType: PolicyActionType.MEMBER_KICK,
           supportedByCanonicalDetectorPath: true,
         });
+      case EnterpriseOperationalScenario.UNAUTHORIZED_INTEGRATION_APPLICATION_MANAGEMENT:
+        return Object.freeze({
+          scenario: override,
+          actionType: PolicyActionType.INTEGRATION_MANAGEMENT,
+          supportedByCanonicalDetectorPath: true,
+        });
       case EnterpriseOperationalScenario.STARTUP_RECONCILIATION_AFTER_DOWNTIME:
         return Object.freeze({
           scenario: override,
@@ -407,6 +415,19 @@ function resolveEnterpriseScenarioContract(
       return Object.freeze({
         scenario: EnterpriseOperationalScenario.UNAUTHORIZED_EMOJI_STICKER_DELETION,
         actionType: PolicyActionType.MEMBER_KICK,
+        supportedByCanonicalDetectorPath: true,
+      });
+    case 'GUILD_INTEGRATIONS_UPDATE':
+    case 'INTEGRATION_CREATE':
+    case 'INTEGRATION_UPDATE':
+    case 'INTEGRATION_DELETE':
+    case 'APPLICATION_INSTALL':
+    case 'APPLICATION_REMOVE':
+    case 'APPLICATION_CONFIGURATION_UPDATE':
+    case 'APPLICATION_CONFIG_UPDATE':
+      return Object.freeze({
+        scenario: EnterpriseOperationalScenario.UNAUTHORIZED_INTEGRATION_APPLICATION_MANAGEMENT,
+        actionType: PolicyActionType.INTEGRATION_MANAGEMENT,
         supportedByCanonicalDetectorPath: true,
       });
     case 'MEMBER_REMOVE':
@@ -900,6 +921,48 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return this.readString(webhook, 'id', 'webhookId', 'webhook_id');
   }
 
+  private readIntegrationId(payload: unknown): string | undefined {
+    const record = this.readRecord(payload);
+    const direct = this.readString(
+      record,
+      'integrationId',
+      'integration_id',
+      'ownerIntegrationId',
+      'owner_integration_id',
+      'targetId',
+      'target_id',
+      'resourceId',
+      'resource_id',
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const integration = this.readRecord(record?.integration);
+    return this.readString(integration, 'id', 'integrationId', 'integration_id');
+  }
+
+  private readApplicationId(payload: unknown): string | undefined {
+    const record = this.readRecord(payload);
+    const direct = this.readString(
+      record,
+      'applicationId',
+      'application_id',
+      'appId',
+      'app_id',
+      'targetId',
+      'target_id',
+      'resourceId',
+      'resource_id',
+    );
+    if (direct) {
+      return direct;
+    }
+
+    const application = this.readRecord(record?.application);
+    return this.readString(application, 'id', 'applicationId', 'application_id');
+  }
+
   private readChannelId(payload: unknown): string | undefined {
     const record = this.readRecord(payload);
     const direct = this.readString(
@@ -1310,6 +1373,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return Object.freeze([...new Set([...this.runtimeAuthorizedIntegrationIds, ...inline])]);
   }
 
+  private resolveAuthorizedApplicationIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedApplicationIds');
+    return Object.freeze([...new Set([...inline])]);
+  }
+
   private resolveAuthorizedChannelIds(payload: unknown): readonly string[] {
     const record = this.readRecord(payload);
     const inline = this.readStringArray(record, 'authorizedChannelIds');
@@ -1374,6 +1443,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     webhookId: string | undefined,
     channelId: string | undefined,
     overwriteId: string | undefined,
+    integrationId: string | undefined,
+    applicationId: string | undefined,
   ): string {
     if (botId) {
       return ['bot-add', this.guildId, botId, actorId].join(':');
@@ -1405,6 +1476,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     if (actionType === PolicyActionType.PERMISSION_OVERWRITE_UPDATE && channelId && overwriteId) {
       return ['permission-overwrite', this.guildId, channelId, overwriteId, actorId].join(':');
+    }
+
+    if (actionType === PolicyActionType.INTEGRATION_MANAGEMENT && (integrationId || applicationId)) {
+      return ['integration-management', this.guildId, integrationId ?? applicationId ?? 'unknown-integration', actorId].join(':');
     }
 
     if (
@@ -1657,6 +1732,32 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     });
   }
 
+  private readUnauthorizedIntegrationManagementDetectionMetadata(
+    detectionResults: readonly DetectionResult[],
+  ): {
+    readonly unauthorizedIntegrationManagement: boolean;
+    readonly integrationPolicyViolation: boolean;
+    readonly isAuthorizedIntegration: boolean;
+    readonly isAuthorizedApplication: boolean;
+    readonly isTrustedActor: boolean;
+  } {
+    const detectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-integration-management-detector',
+    );
+
+    const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
+      ? (detectorResult.metadata as Record<string, unknown>)
+      : undefined;
+
+    return Object.freeze({
+      unauthorizedIntegrationManagement: detectorResult?.matched === true,
+      integrationPolicyViolation: metadata?.integrationPolicyViolation === true,
+      isAuthorizedIntegration: metadata?.isAuthorizedIntegration === true,
+      isAuthorizedApplication: metadata?.isAuthorizedApplication === true,
+      isTrustedActor: metadata?.isTrustedActor === true,
+    });
+  }
+
   private pruneChannelPunishmentSuppressionKeys(nowMs: number): void {
     for (const [key, expiresAtMs] of this.processedChannelPunishmentKeys.entries()) {
       if (expiresAtMs <= nowMs) {
@@ -1803,6 +1904,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           return AuditActionType.MEMBER_BAN;
         case PolicyActionType.MEMBER_KICK:
           return AuditActionType.MEMBER_KICK;
+        case PolicyActionType.INTEGRATION_MANAGEMENT:
+          return AuditActionType.INTEGRATION_MANAGEMENT;
         default:
           return AuditActionType.BOT_ADD;
       }
@@ -1845,6 +1948,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     overwriteId: string | undefined,
     memberUserId: string | undefined,
     roleId: string | undefined,
+    integrationId: string | undefined,
+    applicationId: string | undefined,
     roleContainmentPolicy: {
       readonly punishActor: boolean;
       readonly neutralizeTarget: boolean;
@@ -1859,6 +1964,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     unauthorizedWebhookDetected: boolean,
     isAuthorizedWebhook: boolean,
     isAuthorizedIntegration: boolean,
+    unauthorizedIntegrationManagement: boolean,
+    integrationPolicyViolation: boolean,
+    isAuthorizedApplication: boolean,
+    isTrustedIntegrationActor: boolean,
     unauthorizedChannelCreation: boolean,
     unauthorizedChannelDeletion: boolean,
     isAuthorizedChannel: boolean,
@@ -1920,6 +2029,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         overwriteId,
         memberUserId,
         roleId,
+        integrationId,
+        applicationId,
         eventName: event.eventName,
         isBotAdd,
         unauthorizedBotDetected,
@@ -1927,11 +2038,18 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         unauthorizedWebhookDetected,
         isAuthorizedWebhook,
         isAuthorizedIntegration,
+        unauthorizedIntegrationManagement,
+        integrationPolicyViolation,
         trustedInviter,
         rogueInviterPunishmentPlanned: isBotAdd && unauthorizedBotDetected && !trustedInviter,
         webhookContainmentRequired: unauthorizedWebhookDetected,
         webhookPolicyViolation: unauthorizedWebhookDetected,
         policyWebhookPunishActor: webhookContainmentPolicy.punishActor,
+        integrationContainmentRequired: unauthorizedIntegrationManagement,
+        policyIntegrationPunishActor: true,
+        applicationPolicyViolation: integrationPolicyViolation,
+        isAuthorizedApplication,
+        isTrustedIntegrationActor,
         unauthorizedChannelCreation,
         unauthorizedChannelDeletion,
         channelContainmentRequired:
@@ -1979,6 +2097,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           roleDeletionContainmentRequired:
             roleDeletionContainmentPolicy.containmentRequired && unauthorizedRoleDeletion,
           webhookPunishActor: webhookContainmentPolicy.punishActor,
+          integrationPunishActor: true,
+          integrationContainmentRequired: unauthorizedIntegrationManagement,
+          integrationPolicyViolation,
           channelPunishActor: channelContainmentPolicy.punishActor && !channelPunishmentSuppressed,
           channelContainmentRequired:
             channelContainmentPolicy.containmentRequired && (unauthorizedChannelCreation || unauthorizedChannelDeletion),
@@ -2002,6 +2123,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.detectorRegistry.register(new UnauthorizedPermissionOverwriteDetector());
     this.detectorRegistry.register(new UnauthorizedMemberModerationDetector());
     this.detectorRegistry.register(new UnauthorizedEmojiStickerDeletionDetector());
+    this.detectorRegistry.register(new UnauthorizedIntegrationManagementDetector());
     this.detectorRegistry.register(new DangerousRoleGrantDetectorPluginAdapter());
     this.detectorRegistry.register(
       new ScenarioContractDetectorPlugin(
@@ -2132,6 +2254,15 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       case 'MEMBER_REMOVE':
       case 'GUILD_MEMBER_REMOVE':
         return PolicyActionType.MEMBER_KICK;
+      case 'GUILD_INTEGRATIONS_UPDATE':
+      case 'INTEGRATION_CREATE':
+      case 'INTEGRATION_UPDATE':
+      case 'INTEGRATION_DELETE':
+      case 'APPLICATION_INSTALL':
+      case 'APPLICATION_REMOVE':
+      case 'APPLICATION_CONFIGURATION_UPDATE':
+      case 'APPLICATION_CONFIG_UPDATE':
+        return PolicyActionType.INTEGRATION_MANAGEMENT;
       default:
         return PolicyActionType.BOT_ADD;
     }
@@ -2179,6 +2310,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const overwriteId = this.readOverwriteId(event.payload);
     const memberUserId = this.readMemberUserId(event.payload);
     const roleId = this.readRoleId(event.payload);
+    const integrationId = this.readIntegrationId(event.payload);
+    const applicationId = this.readApplicationId(event.payload);
     const roleContainmentPolicy = this.readRoleContainmentPolicy(event.payload);
     const memberModerationContainmentPolicy = this.readMemberModerationContainmentPolicy(event.payload);
     const roleDeletionContainmentPolicy = this.readRoleDeletionContainmentPolicy(event.payload);
@@ -2214,6 +2347,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       webhookId,
       channelId,
       overwriteId,
+      integrationId,
+      applicationId,
     );
     if (this.hasReplaySuppressionKey(replaySuppressionKey, nowMs)) {
       this.logger.warn('Canonical Guardian replay suppressed', {
@@ -2231,6 +2366,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const trustedBotIds = this.resolveTrustedBotIds(event.payload);
     const authorizedWebhookIds = this.resolveAuthorizedWebhookIds(event.payload);
     const authorizedIntegrationIds = this.resolveAuthorizedIntegrationIds(event.payload);
+    const authorizedApplicationIds = this.resolveAuthorizedApplicationIds(event.payload);
     const authorizedChannelIds = this.resolveAuthorizedChannelIds(event.payload);
     const authorizedOverwriteIds = this.resolveAuthorizedOverwriteIds(event.payload);
     const trustedChannelAdminIds = this.resolveTrustedChannelAdminIds(event.payload);
@@ -2268,6 +2404,13 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           webhookAuthorization: Object.freeze({
             authorizedWebhookIds,
             authorizedIntegrationIds,
+          }),
+          integrationId,
+          applicationId,
+          integrationAuthorization: Object.freeze({
+            authorizedIntegrationIds,
+            authorizedApplicationIds,
+            trustedActorIds: trustedMemberAdminIds,
           }),
           authorizedChannelIds,
           authorizedOverwriteIds,
@@ -2365,6 +2508,25 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         actionType,
         actorId,
         webhookId,
+      });
+      return;
+    }
+
+    if (
+      actionType === PolicyActionType.INTEGRATION_MANAGEMENT &&
+      !effectiveDetectionResults.some(
+        (result) => result.detectorId === 'unauthorized-integration-management-detector' && result.matched,
+      )
+    ) {
+      this.logger.info('Canonical Guardian integration management containment not required', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        actorId,
+        integrationId,
+        applicationId,
       });
       return;
     }
@@ -2480,6 +2642,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const memberModerationDetectionMetadata = this.readUnauthorizedMemberModerationDetectionMetadata(
       effectiveDetectionResults,
     );
+    const integrationDetectionMetadata = this.readUnauthorizedIntegrationManagementDetectionMetadata(
+      effectiveDetectionResults,
+    );
     const rolePunishmentSuppressed =
       ((actionType === PolicyActionType.ROLE_CREATE && roleCreationDetectionMetadata.unauthorizedRoleCreation) ||
         (actionType === PolicyActionType.ROLE_DELETE && roleDeletionDetectionMetadata.unauthorizedRoleDeletion))
@@ -2511,6 +2676,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       overwriteId,
       memberUserId,
       roleId,
+      integrationId,
+      applicationId,
       effectiveRoleContainmentPolicy,
       webhookContainmentPolicy,
       botAddEvent,
@@ -2518,7 +2685,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       botDetectionMetadata.isAuthorizedBot,
       webhookDetectionMetadata.unauthorizedWebhookDetected,
       webhookDetectionMetadata.isAuthorizedWebhook,
-      webhookDetectionMetadata.isAuthorizedIntegration,
+      webhookDetectionMetadata.isAuthorizedIntegration || integrationDetectionMetadata.isAuthorizedIntegration,
+      integrationDetectionMetadata.unauthorizedIntegrationManagement,
+      integrationDetectionMetadata.integrationPolicyViolation,
+      integrationDetectionMetadata.isAuthorizedApplication,
+      integrationDetectionMetadata.isTrustedActor,
       channelDetectionMetadata.unauthorizedChannelCreation,
       channelDetectionMetadata.unauthorizedChannelDeletion,
       channelDetectionMetadata.isAuthorizedChannel,

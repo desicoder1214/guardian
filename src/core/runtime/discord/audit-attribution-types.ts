@@ -11,6 +11,7 @@ export enum AuditActionType {
   WEBHOOK_CREATE = 'WEBHOOK_CREATE',
   WEBHOOK_DELETE = 'WEBHOOK_DELETE',
   BOT_ADD = 'BOT_ADD',
+  INTEGRATION_MANAGEMENT = 'INTEGRATION_MANAGEMENT',
 }
 
 export interface AuditLogEntry {

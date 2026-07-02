@@ -119,6 +119,49 @@ function resolveRoleEscalationActions(metadata: unknown): readonly SecurityActio
   return Object.freeze(actions);
 }
 
+function resolveIntegrationManagementActions(metadata: unknown): readonly SecurityActionType[] {
+  const metadataRecord = readRecord(metadata);
+  const policyRecord = readRecord(metadataRecord?.policy);
+
+  const containmentRequired = readBoolean(
+    metadataRecord,
+    'integrationContainmentRequired',
+    'integration_containment_required',
+  ) ?? true;
+  const punishActor = readBoolean(
+    metadataRecord,
+    'policyIntegrationPunishActor',
+    'policy_integration_punish_actor',
+  ) ?? readBoolean(
+    policyRecord,
+    'integrationPunishActor',
+    'integration_punish_actor',
+  ) ?? readBoolean(
+    policyRecord,
+    'punishActor',
+    'punish_actor',
+  ) ?? true;
+  const actorId =
+    (typeof metadataRecord?.actorId === 'string' && metadataRecord.actorId.length > 0
+      ? metadataRecord.actorId
+      : undefined) ?? 'unknown-actor';
+  const punishableActor = actorId !== 'unknown-actor';
+
+  if (!containmentRequired) {
+    return Object.freeze([SecurityActionType.NONE]);
+  }
+
+  const actions: SecurityActionType[] = [SecurityActionType.REVOKE_ESCALATION_SOURCE];
+
+  if (punishActor && punishableActor) {
+    actions.push(SecurityActionType.QUARANTINE_ACTOR);
+  }
+
+  actions.push(SecurityActionType.CREATE_INCIDENT, SecurityActionType.NOTIFY_AUDIT);
+
+  return Object.freeze(actions);
+}
+
 function resolveWebhookContainmentActions(metadata: unknown): readonly SecurityActionType[] {
   const metadataRecord = readRecord(metadata);
   const policyRecord = readRecord(metadataRecord?.policy);
@@ -513,6 +556,9 @@ export class InMemorySecurityActionPlanner implements SecurityActionPlanner {
     const resolvedActionTypes =
       decisionModel.decision === SecurityDecision.BLOCK && decisionModel.actionType === 'ROLE_CREATE'
         ? resolveRoleEscalationActions(decisionModel.metadata)
+        : decisionModel.decision === SecurityDecision.BLOCK &&
+            decisionModel.actionType === 'INTEGRATION_MANAGEMENT'
+          ? resolveIntegrationManagementActions(decisionModel.metadata)
         : decisionModel.decision === SecurityDecision.BLOCK && decisionModel.actionType === 'WEBHOOK_CREATE'
           ? resolveWebhookContainmentActions(decisionModel.metadata)
           : decisionModel.decision === SecurityDecision.BLOCK && decisionModel.actionType === 'WEBHOOK_DELETE'

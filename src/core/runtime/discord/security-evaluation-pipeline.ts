@@ -33,6 +33,7 @@ export const SECURITY_ACTION_TO_AUDIT_ACTION_MAP: Readonly<Record<SecurityAction
   [SecurityActionType.WEBHOOK_CREATE]: AuditActionType.WEBHOOK_CREATE,
   [SecurityActionType.WEBHOOK_DELETE]: AuditActionType.WEBHOOK_DELETE,
   [SecurityActionType.BOT_ADD]: AuditActionType.BOT_ADD,
+  [SecurityActionType.INTEGRATION_MANAGEMENT]: AuditActionType.INTEGRATION_MANAGEMENT,
 };
 
 export function resolveAuditActionType(actionType: SecurityActionType): AuditActionType | undefined {

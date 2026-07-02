@@ -36,6 +36,10 @@ import {
   ProductionDiscordMemberModerationOperation,
   ProductionDiscordMemberModerationOperationOptions,
 } from './discord-member-moderation-operation';
+import {
+  ProductionDiscordIntegrationRestorationOperation,
+  ProductionDiscordIntegrationRestorationOperationOptions,
+} from './discord-integration-restoration-operation';
 
 export interface ProductionDiscordHttpRequest {
   readonly method: string;
@@ -228,6 +232,31 @@ function toMemberModerationOperationOptions(
   });
 }
 
+function toIntegrationRestorationOperationOptions(
+  options: ProductionDiscordExecutionAdapterOptions,
+): ProductionDiscordIntegrationRestorationOperationOptions {
+  const fetchFn: NonNullable<ProductionDiscordIntegrationRestorationOperationOptions['fetchFn']> = (
+    input,
+    init,
+  ) =>
+    options.httpClient.request(
+      Object.freeze({
+        method: init.method,
+        url: input,
+        headers: Object.freeze({ ...init.headers }),
+        body: init.body,
+      }),
+    );
+
+  return Object.freeze({
+    botToken: options.botToken,
+    apiBaseUrl: options.apiBaseUrl,
+    apiVersion: options.apiVersion,
+    userAgent: options.userAgent,
+    fetchFn,
+  });
+}
+
 export class ProductionDiscordExecutionAdapter implements DiscordExecutionService {
   readonly member: MemberExecutionService;
   readonly role: RoleExecutionService;
@@ -254,6 +283,9 @@ export class ProductionDiscordExecutionAdapter implements DiscordExecutionServic
     const permissionOverwriteOperation = new ProductionDiscordPermissionOverwriteOperation(
       toPermissionOverwriteOperationOptions(options),
     );
+    const integrationRestorationOperation = new ProductionDiscordIntegrationRestorationOperation(
+      toIntegrationRestorationOperationOptions(options),
+    );
     this.delegate = new ProductionDiscordExecutionService(
       {
         memberModerationOperation,
@@ -262,6 +294,7 @@ export class ProductionDiscordExecutionAdapter implements DiscordExecutionServic
         webhookRemovalOperation: webhookOperation,
         channelContainmentOperation,
         permissionOverwriteOperation,
+        integrationRestorationOperation,
       },
       toServiceOptions(options),
     );
