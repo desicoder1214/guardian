@@ -26,6 +26,7 @@ import { UnauthorizedChannelDeleteDetector } from './discord/unauthorized-channe
 import { UnauthorizedRoleDeleteDetector } from './discord/unauthorized-role-delete-detector';
 import { UnauthorizedRoleCreateDetector } from './discord/unauthorized-role-create-detector';
 import { UnauthorizedPermissionOverwriteDetector } from './discord/unauthorized-permission-overwrite-detector';
+import { UnauthorizedMemberModerationDetector } from './discord/unauthorized-member-moderation-detector';
 import { DangerousRoleGrantDetector } from './discord/dangerous-role-grant-detector';
 import {
   InMemorySecurityContextBuilder,
@@ -110,6 +111,8 @@ enum EnterpriseOperationalScenario {
   UNAUTHORIZED_CHANNEL_CREATION = 'UNAUTHORIZED_CHANNEL_CREATION',
   CHANNEL_PERMISSION_DRIFT = 'CHANNEL_PERMISSION_DRIFT',
   UNAUTHORIZED_PERMISSION_OVERWRITE = 'UNAUTHORIZED_PERMISSION_OVERWRITE',
+  UNAUTHORIZED_MEMBER_BAN = 'UNAUTHORIZED_MEMBER_BAN',
+  UNAUTHORIZED_MEMBER_KICK = 'UNAUTHORIZED_MEMBER_KICK',
   STARTUP_RECONCILIATION_AFTER_DOWNTIME = 'STARTUP_RECONCILIATION_AFTER_DOWNTIME',
   RECOVERY_RESTORATION = 'RECOVERY_RESTORATION',
 }
@@ -266,6 +269,18 @@ function resolveEnterpriseScenarioContract(
           actionType: PolicyActionType.PERMISSION_OVERWRITE_UPDATE,
           supportedByCanonicalDetectorPath: true,
         });
+      case EnterpriseOperationalScenario.UNAUTHORIZED_MEMBER_BAN:
+        return Object.freeze({
+          scenario: override,
+          actionType: PolicyActionType.MEMBER_BAN,
+          supportedByCanonicalDetectorPath: true,
+        });
+      case EnterpriseOperationalScenario.UNAUTHORIZED_MEMBER_KICK:
+        return Object.freeze({
+          scenario: override,
+          actionType: PolicyActionType.MEMBER_KICK,
+          supportedByCanonicalDetectorPath: true,
+        });
       case EnterpriseOperationalScenario.STARTUP_RECONCILIATION_AFTER_DOWNTIME:
         return Object.freeze({
           scenario: override,
@@ -370,6 +385,20 @@ function resolveEnterpriseScenarioContract(
         actionType: PolicyActionType.PERMISSION_OVERWRITE_UPDATE,
         supportedByCanonicalDetectorPath: true,
       });
+    case 'GUILD_BAN_ADD':
+    case 'MEMBER_BAN':
+      return Object.freeze({
+        scenario: EnterpriseOperationalScenario.UNAUTHORIZED_MEMBER_BAN,
+        actionType: PolicyActionType.MEMBER_BAN,
+        supportedByCanonicalDetectorPath: true,
+      });
+    case 'MEMBER_REMOVE':
+    case 'GUILD_MEMBER_REMOVE':
+      return Object.freeze({
+        scenario: EnterpriseOperationalScenario.UNAUTHORIZED_MEMBER_KICK,
+        actionType: PolicyActionType.MEMBER_KICK,
+        supportedByCanonicalDetectorPath: true,
+      });
     case 'STARTUP_RECONCILIATION_AFTER_DOWNTIME':
       return Object.freeze({
         scenario: EnterpriseOperationalScenario.STARTUP_RECONCILIATION_AFTER_DOWNTIME,
@@ -445,6 +474,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private static readonly CHANNEL_INCIDENT_MAX_ENTRIES = 10_000;
   private static readonly ROLE_INCIDENT_PUNISHMENT_WINDOW_MS = 60_000;
   private static readonly ROLE_INCIDENT_MAX_ENTRIES = 10_000;
+  private static readonly MEMBER_INCIDENT_PUNISHMENT_WINDOW_MS = 60_000;
+  private static readonly MEMBER_INCIDENT_MAX_ENTRIES = 10_000;
 
   private readonly logger: Logger;
   private readonly eventPipeline: DiscordEventPipeline;
@@ -469,9 +500,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private readonly runtimeTrustedChannelAdminIds: readonly string[];
   private readonly runtimeAuthorizedRoleIds: readonly string[];
   private readonly runtimeTrustedRoleAdminIds: readonly string[];
+  private readonly runtimeAuthorizedMemberIds: readonly string[];
+  private readonly runtimeTrustedMemberAdminIds: readonly string[];
   private readonly processedContainmentKeys = new Map<string, number>();
   private readonly processedChannelPunishmentKeys = new Map<string, number>();
   private readonly processedRolePunishmentKeys = new Map<string, number>();
+  private readonly processedMemberPunishmentKeys = new Map<string, number>();
   private replaySuppressionEventsSincePrune = 0;
   private unsubscribeEventHandler?: () => void;
 
@@ -496,6 +530,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.runtimeTrustedChannelAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_CHANNEL_ADMIN_IDS');
     this.runtimeAuthorizedRoleIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_ROLE_IDS');
     this.runtimeTrustedRoleAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_ROLE_ADMIN_IDS');
+    this.runtimeAuthorizedMemberIds = this.readIdListFromEnvironment('GUARDIAN_AUTHORIZED_MEMBER_IDS');
+    this.runtimeTrustedMemberAdminIds = this.readIdListFromEnvironment('GUARDIAN_TRUSTED_MEMBER_ADMIN_IDS');
     this.eventPipeline = new InMemoryDiscordEventPipeline(
       eventBus,
       healthService,
@@ -646,6 +682,20 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           }),
           Object.freeze({
             actionType: PolicyActionType.PERMISSION_OVERWRITE_UPDATE,
+            enabled: true,
+            threshold: 0,
+            windowMs: 60_000,
+            decisionOnViolation: SecurityDecision.BLOCK,
+          }),
+          Object.freeze({
+            actionType: PolicyActionType.MEMBER_BAN,
+            enabled: true,
+            threshold: 0,
+            windowMs: 60_000,
+            decisionOnViolation: SecurityDecision.BLOCK,
+          }),
+          Object.freeze({
+            actionType: PolicyActionType.MEMBER_KICK,
             enabled: true,
             threshold: 0,
             windowMs: 60_000,
@@ -961,6 +1011,29 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     });
   }
 
+  private readMemberModerationContainmentPolicy(payload: unknown): {
+    readonly punishActor: boolean;
+    readonly containmentRequired: boolean;
+  } {
+    const record = this.readRecord(payload);
+    const policy = this.readRecord(record?.policy);
+
+    const punishActor =
+      this.readBoolean(policy, 'punishActor', 'punish_actor') ??
+      this.readBoolean(record, 'policyMemberPunishActor', 'policy_member_punish_actor') ??
+      this.readBoolean(record, 'policyPunishActor', 'policy_punish_actor') ??
+      true;
+    const containmentRequired =
+      this.readBoolean(policy, 'containmentRequired', 'containment_required') ??
+      this.readBoolean(record, 'memberModerationContainmentRequired', 'member_moderation_containment_required') ??
+      true;
+
+    return Object.freeze({
+      punishActor,
+      containmentRequired,
+    });
+  }
+
   private mergeRoleContainmentPolicyFromDetections(
     roleContainmentPolicy: {
       readonly punishActor: boolean;
@@ -1246,6 +1319,18 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return Object.freeze([...new Set([...this.runtimeTrustedRoleAdminIds, ...this.trustedInviterIds, ...inline])]);
   }
 
+  private resolveAuthorizedMemberIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'authorizedMemberIds');
+    return Object.freeze([...new Set([...this.runtimeAuthorizedMemberIds, ...inline])]);
+  }
+
+  private resolveTrustedMemberAdminIds(payload: unknown): readonly string[] {
+    const record = this.readRecord(payload);
+    const inline = this.readStringArray(record, 'trustedMemberAdminIds');
+    return Object.freeze([...new Set([...this.runtimeTrustedMemberAdminIds, ...this.trustedInviterIds, ...inline])]);
+  }
+
   private buildReplaySuppressionKey(
     event: DiscordGatewayNormalizedEvent,
     actionType: PolicyActionType,
@@ -1283,6 +1368,17 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     if (actionType === PolicyActionType.PERMISSION_OVERWRITE_UPDATE && channelId && overwriteId) {
       return ['permission-overwrite', this.guildId, channelId, overwriteId, actorId].join(':');
+    }
+
+    if (
+      (actionType === PolicyActionType.MEMBER_BAN || actionType === PolicyActionType.MEMBER_KICK) &&
+      actorId !== 'unknown-actor'
+    ) {
+      return ['member-moderation', this.guildId, actorId].join(':');
+    }
+
+    if (actionType === PolicyActionType.MEMBER_BAN || actionType === PolicyActionType.MEMBER_KICK) {
+      return ['member-moderation-target', this.guildId, memberUserId ?? 'unknown-member', event.eventName].join(':');
     }
 
     return ['event', this.guildId, event.eventName, event.correlationId].join(':');
@@ -1490,6 +1586,32 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     });
   }
 
+  private readUnauthorizedMemberModerationDetectionMetadata(
+    detectionResults: readonly DetectionResult[],
+  ): {
+    readonly unauthorizedMemberModeration: boolean;
+    readonly memberModerationPolicyViolation: boolean;
+    readonly isAuthorizedMember: boolean;
+    readonly isAuthorizedActor: boolean;
+    readonly isTrustedActor: boolean;
+  } {
+    const detectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-member-moderation-detector',
+    );
+
+    const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
+      ? (detectorResult.metadata as Record<string, unknown>)
+      : undefined;
+
+    return Object.freeze({
+      unauthorizedMemberModeration: detectorResult?.matched === true,
+      memberModerationPolicyViolation: metadata?.memberModerationPolicyViolation === true,
+      isAuthorizedMember: metadata?.isAuthorizedMember === true,
+      isAuthorizedActor: metadata?.isAuthorizedActor === true,
+      isTrustedActor: metadata?.isTrustedActor === true,
+    });
+  }
+
   private pruneChannelPunishmentSuppressionKeys(nowMs: number): void {
     for (const [key, expiresAtMs] of this.processedChannelPunishmentKeys.entries()) {
       if (expiresAtMs <= nowMs) {
@@ -1562,6 +1684,42 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     return false;
   }
 
+  private pruneMemberPunishmentSuppressionKeys(nowMs: number): void {
+    for (const [key, expiresAtMs] of this.processedMemberPunishmentKeys.entries()) {
+      if (expiresAtMs <= nowMs) {
+        this.processedMemberPunishmentKeys.delete(key);
+      }
+    }
+
+    while (this.processedMemberPunishmentKeys.size > IntegratedCanonicalGuardianRuntime.MEMBER_INCIDENT_MAX_ENTRIES) {
+      const oldestKey = this.processedMemberPunishmentKeys.keys().next().value;
+      if (!oldestKey) {
+        break;
+      }
+
+      this.processedMemberPunishmentKeys.delete(oldestKey);
+    }
+  }
+
+  private shouldSuppressMemberActorPunishment(actorId: string, nowMs: number): boolean {
+    if (!actorId || actorId === 'unknown-actor') {
+      return true;
+    }
+
+    this.pruneMemberPunishmentSuppressionKeys(nowMs);
+    const key = `${this.guildId}:${actorId}`;
+    const expiresAtMs = this.processedMemberPunishmentKeys.get(key);
+    if (expiresAtMs && expiresAtMs > nowMs) {
+      return true;
+    }
+
+    this.processedMemberPunishmentKeys.set(
+      key,
+      nowMs + IntegratedCanonicalGuardianRuntime.MEMBER_INCIDENT_PUNISHMENT_WINDOW_MS,
+    );
+    return false;
+  }
+
   private readAuditActionType(value: unknown): AuditActionType | undefined {
     if (typeof value !== 'string') {
       return undefined;
@@ -1596,6 +1754,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           return AuditActionType.CHANNEL_DELETE;
         case PolicyActionType.PERMISSION_OVERWRITE_UPDATE:
           return AuditActionType.PERMISSION_OVERWRITE_UPDATE;
+        case PolicyActionType.MEMBER_BAN:
+          return AuditActionType.MEMBER_BAN;
+        case PolicyActionType.MEMBER_KICK:
+          return AuditActionType.MEMBER_KICK;
         default:
           return AuditActionType.BOT_ADD;
       }
@@ -1671,6 +1833,15 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     isAuthorizedRole: boolean,
     isAuthorizedRoleActor: boolean,
     isTrustedRoleActor: boolean,
+    unauthorizedMemberModeration: boolean,
+    memberModerationPolicyViolation: boolean,
+    isAuthorizedMember: boolean,
+    isAuthorizedMemberActor: boolean,
+    isTrustedMemberActor: boolean,
+    memberModerationContainmentPolicy: {
+      readonly punishActor: boolean;
+      readonly containmentRequired: boolean;
+    },
     roleDeletionContainmentPolicy: {
       readonly punishActor: boolean;
       readonly containmentRequired: boolean;
@@ -1681,6 +1852,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     },
     rolePunishmentSuppressed: boolean,
     channelPunishmentSuppressed: boolean,
+    memberPunishmentSuppressed: boolean,
   ) {
     const metadata =
       decision.metadata && typeof decision.metadata === 'object'
@@ -1743,6 +1915,14 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         isAuthorizedRoleActor,
         isTrustedRoleActor,
         policyRoleDeletePunishActor: roleDeletionContainmentPolicy.punishActor && !rolePunishmentSuppressed,
+        unauthorizedMemberModeration,
+        memberModerationPolicyViolation,
+        memberModerationContainmentRequired:
+          memberModerationContainmentPolicy.containmentRequired && unauthorizedMemberModeration,
+        isAuthorizedMember,
+        isAuthorizedMemberActor,
+        isTrustedMemberActor,
+        policyMemberPunishActor: memberModerationContainmentPolicy.punishActor && !memberPunishmentSuppressed,
         policyPunishActor: policyPunishRoleCreateActor,
         policyNeutralizeTarget: roleContainmentPolicy.neutralizeTarget,
         protectedRole: roleContainmentPolicy.protectedRole,
@@ -1758,6 +1938,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
           channelContainmentRequired:
             channelContainmentPolicy.containmentRequired && (unauthorizedChannelCreation || unauthorizedChannelDeletion),
           permissionOverwriteContainmentRequired: unauthorizedPermissionOverwrite,
+          memberPunishActor: memberModerationContainmentPolicy.punishActor && !memberPunishmentSuppressed,
+          memberModerationContainmentRequired:
+            memberModerationContainmentPolicy.containmentRequired && unauthorizedMemberModeration,
         }),
       }),
     });
@@ -1771,6 +1954,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.detectorRegistry.register(new UnauthorizedRoleCreateDetector());
     this.detectorRegistry.register(new UnauthorizedRoleDeleteDetector());
     this.detectorRegistry.register(new UnauthorizedPermissionOverwriteDetector());
+    this.detectorRegistry.register(new UnauthorizedMemberModerationDetector());
     this.detectorRegistry.register(new DangerousRoleGrantDetectorPluginAdapter());
     this.detectorRegistry.register(
       new ScenarioContractDetectorPlugin(
@@ -1892,6 +2076,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       case 'CHANNEL_OVERWRITE_UPDATE':
       case 'CHANNEL_OVERWRITE_DELETE':
         return PolicyActionType.PERMISSION_OVERWRITE_UPDATE;
+      case 'GUILD_BAN_ADD':
+      case 'MEMBER_BAN':
+        return PolicyActionType.MEMBER_BAN;
+      case 'MEMBER_REMOVE':
+      case 'GUILD_MEMBER_REMOVE':
+        return PolicyActionType.MEMBER_KICK;
       default:
         return PolicyActionType.BOT_ADD;
     }
@@ -1940,6 +2130,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const memberUserId = this.readMemberUserId(event.payload);
     const roleId = this.readRoleId(event.payload);
     const roleContainmentPolicy = this.readRoleContainmentPolicy(event.payload);
+    const memberModerationContainmentPolicy = this.readMemberModerationContainmentPolicy(event.payload);
     const roleDeletionContainmentPolicy = this.readRoleDeletionContainmentPolicy(event.payload);
     const webhookContainmentPolicy = this.readWebhookContainmentPolicy(event.payload);
     const channelContainmentPolicy = this.readChannelContainmentPolicy(event.payload);
@@ -1995,6 +2186,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const trustedChannelAdminIds = this.resolveTrustedChannelAdminIds(event.payload);
     const authorizedRoleIds = this.resolveAuthorizedRoleIds(event.payload);
     const trustedRoleAdminIds = this.resolveTrustedRoleAdminIds(event.payload);
+    const authorizedMemberIds = this.resolveAuthorizedMemberIds(event.payload);
+    const trustedMemberAdminIds = this.resolveTrustedMemberAdminIds(event.payload);
     this.stageAuditLogEntries(event, actionType);
     const detectionResults = await this.detectionEngine.evaluate(
       Object.freeze({
@@ -2043,6 +2236,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
             authorizedRoleIds,
             authorizedActorIds: trustedRoleAdminIds,
             trustedActorIds: trustedRoleAdminIds,
+          }),
+          authorizedMemberIds,
+          memberModerationAuthorization: Object.freeze({
+            authorizedMemberIds,
+            authorizedActorIds: trustedMemberAdminIds,
+            trustedActorIds: trustedMemberAdminIds,
           }),
         }),
       }),
@@ -2180,6 +2379,24 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       return;
     }
 
+    if (
+      (actionType === PolicyActionType.MEMBER_BAN || actionType === PolicyActionType.MEMBER_KICK) &&
+      !effectiveDetectionResults.some(
+        (result) => result.detectorId === 'unauthorized-member-moderation-detector' && result.matched,
+      )
+    ) {
+      this.logger.info('Canonical Guardian member moderation containment not required', {
+        runtimeId: this.runtimeId,
+        guildId: this.guildId,
+        correlationId: event.correlationId,
+        eventName: event.eventName,
+        actionType,
+        actorId,
+        memberUserId,
+      });
+      return;
+    }
+
     this.securityEvaluationPipeline.stageDetectionResults(effectiveDetectionResults);
     const decision = await this.securityEvaluationPipeline.evaluate(event, actorId, actionType);
     const effectiveActorId =
@@ -2194,6 +2411,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     );
     const roleCreationDetectionMetadata = this.readUnauthorizedRoleCreationDetectionMetadata(effectiveDetectionResults);
     const roleDeletionDetectionMetadata = this.readUnauthorizedRoleDeletionDetectionMetadata(effectiveDetectionResults);
+    const memberModerationDetectionMetadata = this.readUnauthorizedMemberModerationDetectionMetadata(
+      effectiveDetectionResults,
+    );
     const rolePunishmentSuppressed =
       ((actionType === PolicyActionType.ROLE_CREATE && roleCreationDetectionMetadata.unauthorizedRoleCreation) ||
         (actionType === PolicyActionType.ROLE_DELETE && roleDeletionDetectionMetadata.unauthorizedRoleDeletion))
@@ -2205,6 +2425,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         (actionType === PolicyActionType.PERMISSION_OVERWRITE_UPDATE &&
           permissionOverwriteDetectionMetadata.unauthorizedPermissionOverwrite))
         ? this.shouldSuppressChannelActorPunishment(effectiveActorId, nowMs)
+        : false;
+    const memberPunishmentSuppressed =
+      (actionType === PolicyActionType.MEMBER_BAN || actionType === PolicyActionType.MEMBER_KICK) &&
+      memberModerationDetectionMetadata.unauthorizedMemberModeration
+        ? this.shouldSuppressMemberActorPunishment(effectiveActorId, nowMs)
         : false;
     const effectiveRoleContainmentPolicy = this.mergeRoleContainmentPolicyFromDetections(
       roleContainmentPolicy,
@@ -2247,10 +2472,17 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       roleDeletionDetectionMetadata.isAuthorizedRole,
       roleDeletionDetectionMetadata.isAuthorizedActor,
       roleDeletionDetectionMetadata.isTrustedActor,
+      memberModerationDetectionMetadata.unauthorizedMemberModeration,
+      memberModerationDetectionMetadata.memberModerationPolicyViolation,
+      memberModerationDetectionMetadata.isAuthorizedMember,
+      memberModerationDetectionMetadata.isAuthorizedActor,
+      memberModerationDetectionMetadata.isTrustedActor,
+      memberModerationContainmentPolicy,
       roleDeletionContainmentPolicy,
       channelContainmentPolicy,
       rolePunishmentSuppressed,
       channelPunishmentSuppressed,
+      memberPunishmentSuppressed,
     );
 
     const actionPlan = this.actionPlanner.plan(enrichedDecision);

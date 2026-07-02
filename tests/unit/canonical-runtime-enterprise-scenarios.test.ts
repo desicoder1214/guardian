@@ -70,6 +70,8 @@ const SUPPORTED_SCENARIOS = Object.freeze([
   { scenario: 'UNAUTHORIZED_CHANNEL_CREATION', eventName: 'CHANNEL_CREATE', expectedActionType: 'CHANNEL_CREATE' },
   { scenario: 'CHANNEL_PERMISSION_DRIFT', eventName: 'CHANNEL_PERMISSION_DRIFT', expectedActionType: 'CHANNEL_DELETE' },
   { scenario: 'UNAUTHORIZED_PERMISSION_OVERWRITE', eventName: 'PERMISSION_OVERWRITE_UPDATE', expectedActionType: 'PERMISSION_OVERWRITE_UPDATE' },
+  { scenario: 'UNAUTHORIZED_MEMBER_BAN', eventName: 'GUILD_BAN_ADD', expectedActionType: 'MEMBER_BAN' },
+  { scenario: 'UNAUTHORIZED_MEMBER_KICK', eventName: 'MEMBER_REMOVE', expectedActionType: 'MEMBER_KICK' },
 ]);
 
 const FAIL_CLOSED_SCENARIOS = Object.freeze([
@@ -2996,6 +2998,350 @@ describe('IntegratedCanonicalGuardianRuntime role deletion abuse vertical slice'
         url.includes('/api/v10/guilds/guild-role-delete-slice-1/bans/actor-role-delete-burst-1'),
     );
     expect(punishmentCalls).toHaveLength(1);
+  });
+});
+
+describe('IntegratedCanonicalGuardianRuntime member ban/kick abuse vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_AUTHORIZED_MEMBER_IDS;
+    delete process.env.GUARDIAN_TRUSTED_MEMBER_ADMIN_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildMemberModerationEvent(overrides: Record<string, unknown> = {}) {
+    const eventName = typeof overrides.eventName === 'string' ? overrides.eventName : 'GUILD_BAN_ADD';
+    const payload = {
+      guildId: 'guild-member-mod-slice-1',
+      actorId: 'actor-member-mod-slice-1',
+      memberUserId: 'member-target-slice-1',
+      targetId: 'member-target-slice-1',
+      resourceId: 'member-target-slice-1',
+      ...(eventName === 'GUILD_MEMBER_REMOVE' || eventName === 'MEMBER_REMOVE'
+        ? { kicked: true }
+        : {}),
+      ...overrides,
+    };
+
+    delete (payload as { eventName?: unknown }).eventName;
+
+    return {
+      t: eventName,
+      d: payload,
+      ts: '2026-07-02T10:00:00.000Z',
+    };
+  }
+
+  function createRuntime(transport?: CapturingLogTransport) {
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport ?? new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    return new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-member-mod-slice-1',
+      'guild-member-mod-slice-1',
+    );
+  }
+
+  function moderationPunishmentCalls(fetchSpy: jest.Mock, actorId: string): readonly string[] {
+    return fetchSpy.mock.calls
+      .map((call) => String((call as unknown[])[0] ?? ''))
+      .filter(
+        (url) =>
+          url.includes(`/api/v10/guilds/guild-member-mod-slice-1/members/${actorId}`) ||
+          url.includes(`/api/v10/guilds/guild-member-mod-slice-1/bans/${actorId}`),
+      );
+  }
+
+  test('unauthorized member ban executes mandatory rogue actor punishment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildMemberModerationEvent({
+        eventName: 'GUILD_BAN_ADD',
+        actorId: 'actor-member-ban-1',
+        memberUserId: 'member-banned-1',
+        targetId: 'member-banned-1',
+        resourceId: 'member-banned-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(moderationPunishmentCalls(fetchSpy, 'actor-member-ban-1').length).toBeGreaterThan(0);
+  });
+
+  test('authorized member ban performs no containment', async () => {
+    process.env.GUARDIAN_AUTHORIZED_MEMBER_IDS = 'member-safe-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildMemberModerationEvent({
+        eventName: 'GUILD_BAN_ADD',
+        memberUserId: 'member-safe-1',
+        targetId: 'member-safe-1',
+        resourceId: 'member-safe-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('trusted member admin policy is respected', async () => {
+    process.env.GUARDIAN_TRUSTED_MEMBER_ADMIN_IDS = 'trusted-member-admin-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildMemberModerationEvent({
+        eventName: 'MEMBER_REMOVE',
+        actorId: 'trusted-member-admin-1',
+        memberUserId: 'member-kicked-safe-1',
+        targetId: 'member-kicked-safe-1',
+        resourceId: 'member-kicked-safe-1',
+        kicked: true,
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('duplicate and replay member moderation events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime(transport);
+    const replayEvent = buildMemberModerationEvent({
+      eventName: 'GUILD_BAN_ADD',
+      actorId: 'actor-member-replay-1',
+      memberUserId: 'member-replay-1',
+      targetId: 'member-replay-1',
+      resourceId: 'member-replay-1',
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    expect(moderationPunishmentCalls(fetchSpy, 'actor-member-replay-1')).toHaveLength(1);
+    expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
+  });
+
+  test('missing audit log follows existing policy when actor attribution is unavailable', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildMemberModerationEvent({
+        eventName: 'GUILD_BAN_ADD',
+        actorId: 'unknown-actor',
+        memberUserId: 'member-no-audit-1',
+        targetId: 'member-no-audit-1',
+        resourceId: 'member-no-audit-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('delayed attribution can punish the later attributed actor', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildMemberModerationEvent({
+        eventName: 'GUILD_BAN_ADD',
+        actorId: 'unknown-actor',
+        memberUserId: 'member-late-audit-1',
+        targetId: 'member-late-audit-1',
+        resourceId: 'member-late-audit-1',
+      }),
+    );
+    await runtime.ingestGatewayEvent(
+      buildMemberModerationEvent({
+        eventName: 'MEMBER_REMOVE',
+        actorId: 'unknown-actor',
+        memberUserId: 'member-late-audit-2',
+        targetId: 'member-late-audit-2',
+        resourceId: 'member-late-audit-2',
+        kicked: true,
+        auditLogEntry: {
+          id: 'audit-member-late-1',
+          actionType: 'MEMBER_KICK',
+          actorId: 'actor-member-late-audit-1',
+          targetId: 'member-late-audit-2',
+          resourceId: 'member-late-audit-2',
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+    await runtime.stop();
+
+    expect(moderationPunishmentCalls(fetchSpy, 'actor-member-late-audit-1').length).toBeGreaterThan(0);
+  });
+
+  test('member moderation 404 is treated as verified containment and does not trigger recovery', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/api/v10/guilds/guild-member-mod-slice-1/members/actor-member-404-1')) {
+        return {
+          ...createFetchResponse(404),
+          json: async () => Object.freeze({ code: 'UNKNOWN_MEMBER', message: 'Unknown Member' }),
+        };
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildMemberModerationEvent({
+        eventName: 'GUILD_BAN_ADD',
+        actorId: 'actor-member-404-1',
+        memberUserId: 'member-404-1',
+        targetId: 'member-404-1',
+        resourceId: 'member-404-1',
+      }),
+    );
+    await runtime.stop();
+
+    expect(recoverySpy).not.toHaveBeenCalled();
+  });
+
+  test.each([403, 429, 500])(
+    'member moderation containment failure (%i) triggers recovery scheduling',
+    async (statusCode) => {
+      const fetchSpy = jest.fn(async (url: string) => {
+        if (url.includes(`/api/v10/guilds/guild-member-mod-slice-1/members/actor-member-fail-${statusCode}`)) {
+          return createFetchResponse(statusCode);
+        }
+
+        return createFetchResponse(204);
+      });
+      (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+      const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+      const runtime = createRuntime();
+
+      await runtime.start();
+      await runtime.ingestGatewayEvent(
+        buildMemberModerationEvent({
+          eventName: 'GUILD_BAN_ADD',
+          actorId: `actor-member-fail-${statusCode}`,
+          memberUserId: `member-fail-${statusCode}`,
+          targetId: `member-fail-${statusCode}`,
+          resourceId: `member-fail-${statusCode}`,
+        }),
+      );
+      await runtime.stop();
+
+      expect(fetchSpy).toHaveBeenCalled();
+      expect(recoverySpy).toHaveBeenCalled();
+    },
+  );
+
+  test('partial execution schedules recovery when actor moderation fails after incident actions', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/api/v10/guilds/guild-member-mod-slice-1/members/actor-member-partial-1')) {
+        return createFetchResponse(500);
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildMemberModerationEvent({
+        eventName: 'MEMBER_REMOVE',
+        actorId: 'actor-member-partial-1',
+        memberUserId: 'member-partial-1',
+        targetId: 'member-partial-1',
+        resourceId: 'member-partial-1',
+        kicked: true,
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).toHaveBeenCalled();
+  });
+
+  test('simultaneous mass ban/kick burst is coordinated into one actor punishment', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const runtime = createRuntime();
+
+    await runtime.start();
+    await Promise.all([
+      runtime.ingestGatewayEvent(
+        buildMemberModerationEvent({
+          eventName: 'GUILD_BAN_ADD',
+          actorId: 'actor-member-burst-1',
+          memberUserId: 'member-burst-ban-1',
+          targetId: 'member-burst-ban-1',
+          resourceId: 'member-burst-ban-1',
+        }),
+      ),
+      runtime.ingestGatewayEvent(
+        buildMemberModerationEvent({
+          eventName: 'MEMBER_REMOVE',
+          actorId: 'actor-member-burst-1',
+          memberUserId: 'member-burst-kick-1',
+          targetId: 'member-burst-kick-1',
+          resourceId: 'member-burst-kick-1',
+          kicked: true,
+        }),
+      ),
+    ]);
+    await runtime.stop();
+
+    expect(moderationPunishmentCalls(fetchSpy, 'actor-member-burst-1')).toHaveLength(1);
   });
 });
 

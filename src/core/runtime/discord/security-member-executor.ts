@@ -198,6 +198,8 @@ export class DiscordMemberExecutor implements SecurityMemberExecutor {
     const memberUserId =
       request.capability === SecurityExecutorCapability.PUNISH_ROLE_ESCALATION_ACTOR
         ? actorId ?? defaultMemberUserId
+        : request.capability === SecurityExecutorCapability.QUARANTINE_ACTOR
+          ? actorId ?? defaultMemberUserId
         : defaultMemberUserId ?? actorId;
 
     return Object.freeze({
