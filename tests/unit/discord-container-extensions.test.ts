@@ -55,6 +55,8 @@ test.each([GuardianRuntimeMode.PRODUCTION, GuardianRuntimeMode.TESTING, Guardian
   (mode) => {
     const restoreEnv = setEnv({
       GUARDIAN_RUNTIME_MODE: mode,
+      GUARDIAN_RUNTIME_ID: 'runtime-unit-test',
+      GUARDIAN_GUILD_ID: 'guild-unit-test',
       DISCORD_BOT_TOKEN: 'unit-test-token',
       DISCORD_GATEWAY_INTENTS: 'GUILDS',
     });

@@ -1,3 +1,5 @@
+import 'dotenv/config';
+
 export * from './core/config/index';
 export * from './core/event/index';
 export * from './infra/di/container';

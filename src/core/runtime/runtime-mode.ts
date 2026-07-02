@@ -1,3 +1,5 @@
+import { ConfigurationError } from '../../shared/errors';
+
 export enum GuardianRuntimeMode {
   PRODUCTION = 'production',
   VALIDATION = 'validation',
@@ -5,10 +7,16 @@ export enum GuardianRuntimeMode {
   CERTIFICATION = 'certification',
 }
 
-const DEFAULT_RUNTIME_MODE = GuardianRuntimeMode.PRODUCTION;
-
 export function parseGuardianRuntimeMode(value: string | undefined): GuardianRuntimeMode {
-  switch ((value ?? '').trim().toLowerCase()) {
+  const normalized = (value ?? '').trim().toLowerCase();
+
+  if (normalized.length === 0) {
+    throw new ConfigurationError(
+      'Missing required environment variable: GUARDIAN_RUNTIME_MODE. Set GUARDIAN_RUNTIME_MODE to one of: production, validation, testing, certification.',
+    );
+  }
+
+  switch (normalized) {
     case GuardianRuntimeMode.PRODUCTION:
       return GuardianRuntimeMode.PRODUCTION;
     case GuardianRuntimeMode.VALIDATION:
@@ -18,7 +26,9 @@ export function parseGuardianRuntimeMode(value: string | undefined): GuardianRun
     case GuardianRuntimeMode.CERTIFICATION:
       return GuardianRuntimeMode.CERTIFICATION;
     default:
-      return DEFAULT_RUNTIME_MODE;
+      throw new ConfigurationError(
+        `Invalid GUARDIAN_RUNTIME_MODE: ${value}. Allowed values: production, validation, testing, certification.`,
+      );
   }
 }
 

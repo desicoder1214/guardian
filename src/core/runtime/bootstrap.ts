@@ -33,6 +33,32 @@ import { IntegratedCanonicalGuardianRuntime } from './canonical-runtime';
 import { RuntimeHealthService } from './health';
 import { LoggerFactory } from './logger';
 import { InMemoryEventBus } from '../event/bus';
+import { ConfigurationError } from '../../shared/errors';
+
+function requireEnvironmentVariable(key: string): string {
+  const value = process.env[key]?.trim();
+  if (value && value.length > 0) {
+    return value;
+  }
+
+  throw new ConfigurationError(
+    `Missing required environment variable: ${key}. Update .env (see .env.example) and set a non-empty value before starting Guardian.`,
+  );
+}
+
+function validateStartupEnvironment(): void {
+  const requiredKeys = [
+    'GUARDIAN_RUNTIME_MODE',
+    'GUARDIAN_RUNTIME_ID',
+    'GUARDIAN_GUILD_ID',
+    'DISCORD_BOT_TOKEN',
+    'DISCORD_GATEWAY_INTENTS',
+  ] as const;
+
+  for (const key of requiredKeys) {
+    requireEnvironmentVariable(key);
+  }
+}
 
 export class ApplicationBootstrap {
   private readonly container = new ServiceContainer();
@@ -42,9 +68,10 @@ export class ApplicationBootstrap {
   private canonicalRuntime?: IntegratedCanonicalGuardianRuntime;
 
   constructor() {
+    validateStartupEnvironment();
     this.mode = resolveGuardianRuntimeMode();
-    this.runtimeId = process.env.GUARDIAN_RUNTIME_ID ?? 'guardian-runtime';
-    this.guildId = process.env.GUARDIAN_GUILD_ID ?? 'guardian-guild';
+    this.runtimeId = requireEnvironmentVariable('GUARDIAN_RUNTIME_ID');
+    this.guildId = requireEnvironmentVariable('GUARDIAN_GUILD_ID');
 
     this.container.registerSingleton(
       RuntimeConfigurationId,

@@ -11,7 +11,11 @@
     "format:check": "prettier --check src tests package.json tsconfig*.json .eslintrc.json jest.config.js .prettierrc",
     "typecheck": "tsc --noEmit",
     "build": "tsc -p tsconfig.build.json",
-    "test": "jest --runInBand"
+    "test": "jest --runInBand",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
   },
   "devDependencies": {
     "@types/jest": "29.5.14",
