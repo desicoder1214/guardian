@@ -63,6 +63,7 @@ const SUPPORTED_SCENARIOS = Object.freeze([
   { scenario: 'DUPLICATE_BOT_IDENTITY', eventName: 'BOT_DUPLICATE_IDENTITY', expectedActionType: 'BOT_ADD' },
   { scenario: 'DANGEROUS_WEBHOOK_CREATION', eventName: 'WEBHOOK_CREATE', expectedActionType: 'WEBHOOK_CREATE' },
   { scenario: 'WEBHOOK_MODIFICATION', eventName: 'WEBHOOK_MODIFICATION', expectedActionType: 'WEBHOOK_DELETE' },
+  { scenario: 'UNAUTHORIZED_ROLE_CREATION', eventName: 'ROLE_CREATE', expectedActionType: 'ROLE_CREATE' },
   { scenario: 'DANGEROUS_ROLE_GRANT', eventName: 'GUILD_MEMBER_UPDATE', expectedActionType: 'ROLE_CREATE' },
   { scenario: 'UNAUTHORIZED_ROLE_DELETION', eventName: 'ROLE_DELETE', expectedActionType: 'ROLE_DELETE' },
   { scenario: 'PRIVILEGED_PERMISSION_ESCALATION', eventName: 'PRIVILEGED_PERMISSION_ESCALATION', expectedActionType: 'ROLE_CREATE' },
@@ -1695,6 +1696,409 @@ describe('IntegratedCanonicalGuardianRuntime channel creation abuse vertical sli
     await runtime.stop();
 
     expect(fetchSpy).not.toHaveBeenCalled();
+  });
+});
+
+describe('IntegratedCanonicalGuardianRuntime unauthorized role creation vertical slice', () => {
+  const originalEnv = { ...process.env };
+  const originalFetch = (globalThis as { fetch?: unknown }).fetch;
+
+  beforeEach(() => {
+    process.env = { ...originalEnv };
+    process.env.DISCORD_BOT_TOKEN = 'test-bot-token';
+    process.env.DISCORD_API_BASE_URL = 'https://discord.com';
+    delete process.env.GUARDIAN_AUTHORIZED_ROLE_IDS;
+    delete process.env.GUARDIAN_TRUSTED_ROLE_ADMIN_IDS;
+  });
+
+  afterEach(() => {
+    process.env = { ...originalEnv };
+    (globalThis as { fetch?: unknown }).fetch = originalFetch;
+    jest.restoreAllMocks();
+  });
+
+  function buildRoleCreateEvent(overrides: Record<string, unknown> = {}) {
+    return {
+      t: 'ROLE_CREATE',
+      d: {
+        guildId: 'guild-role-create-slice-1',
+        actorId: 'actor-role-create-slice-1',
+        roleId: 'role-created-dangerous-1',
+        role: {
+          id: 'role-created-dangerous-1',
+          permissions: ['ADMINISTRATOR'],
+        },
+        ...overrides,
+      },
+      ts: '2026-07-01T17:00:00.000Z',
+    };
+  }
+
+  test('unauthorized role creation deletes role and punishes actor', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-create-slice-1',
+      'guild-role-create-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(buildRoleCreateEvent());
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(urls.some((url) => url.includes('/api/v10/guilds/guild-role-create-slice-1/roles/role-created-dangerous-1'))).toBe(true);
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-role-create-slice-1/members/actor-role-create-slice-1') ||
+          url.includes('/api/v10/guilds/guild-role-create-slice-1/bans/actor-role-create-slice-1'),
+      ),
+    ).toBe(true);
+  });
+
+  test('authorized role creation performs no containment', async () => {
+    process.env.GUARDIAN_AUTHORIZED_ROLE_IDS = 'role-created-safe-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-create-slice-2',
+      'guild-role-create-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleCreateEvent({
+        roleId: 'role-created-safe-1',
+        role: {
+          id: 'role-created-safe-1',
+          permissions: ['VIEW_CHANNEL'],
+        },
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('trusted role administrator policy is respected', async () => {
+    process.env.GUARDIAN_TRUSTED_ROLE_ADMIN_IDS = 'trusted-role-admin-create-1';
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-create-slice-3',
+      'guild-role-create-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleCreateEvent({
+        actorId: 'trusted-role-admin-create-1',
+        roleId: 'role-created-trusted-safe-1',
+        role: {
+          id: 'role-created-trusted-safe-1',
+          permissions: ['VIEW_CHANNEL'],
+        },
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  test('duplicate/replay role creation events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-create-slice-4',
+      'guild-role-create-slice-1',
+    );
+
+    const replayEvent = buildRoleCreateEvent({
+      actorId: 'actor-role-create-replay-1',
+      roleId: 'role-created-replay-1',
+      role: {
+        id: 'role-created-replay-1',
+        permissions: ['ADMINISTRATOR'],
+      },
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    const deleteCalls = urls.filter((url) =>
+      url.includes('/api/v10/guilds/guild-role-create-slice-1/roles/role-created-replay-1'),
+    );
+    expect(deleteCalls).toHaveLength(1);
+    expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
+  });
+
+  test('late audit attribution still allows actor punishment on later role creation', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-create-slice-5',
+      'guild-role-create-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleCreateEvent({
+        actorId: 'unknown-actor',
+        roleId: 'role-created-late-audit-1',
+        role: {
+          id: 'role-created-late-audit-1',
+          permissions: ['ADMINISTRATOR'],
+        },
+      }),
+    );
+    await runtime.ingestGatewayEvent(
+      buildRoleCreateEvent({
+        actorId: 'unknown-actor',
+        roleId: 'role-created-late-audit-2',
+        role: {
+          id: 'role-created-late-audit-2',
+          permissions: ['ADMINISTRATOR'],
+        },
+        auditLogEntry: {
+          id: 'audit-role-create-late-1',
+          actionType: 'ROLE_CREATE',
+          actorId: 'actor-role-create-late-audit-1',
+          targetId: 'role-created-late-audit-2',
+          resourceId: 'role-created-late-audit-2',
+          timestamp: new Date().toISOString(),
+        },
+      }),
+    );
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    expect(
+      urls.some(
+        (url) =>
+          url.includes('/api/v10/guilds/guild-role-create-slice-1/members/actor-role-create-late-audit-1') ||
+          url.includes('/api/v10/guilds/guild-role-create-slice-1/bans/actor-role-create-late-audit-1'),
+      ),
+    ).toBe(true);
+  });
+
+  test.each([403, 429, 500])(
+    'role creation containment failure (%i) triggers recovery scheduling',
+    async (statusCode) => {
+      const fetchSpy = jest.fn(async (url: string) => {
+        if (url.includes('/api/v10/guilds/guild-role-create-slice-1/roles/role-created-fail-')) {
+          return createFetchResponse(statusCode);
+        }
+
+        return createFetchResponse(204);
+      });
+      (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+      const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+      const eventBus = new InMemoryEventBus();
+      const health = new RuntimeHealthService();
+      const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+      const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+      const runtime = new IntegratedCanonicalGuardianRuntime(
+        GuardianRuntimeMode.PRODUCTION,
+        runtimeManager,
+        new StubDiscordRuntimeAdapter(),
+        eventBus,
+        health,
+        loggerFactory,
+        `runtime-role-create-slice-fail-${statusCode}`,
+        'guild-role-create-slice-1',
+      );
+
+      await runtime.start();
+      await runtime.ingestGatewayEvent(
+        buildRoleCreateEvent({
+          actorId: `actor-role-create-fail-${statusCode}`,
+          roleId: `role-created-fail-${statusCode}`,
+          role: {
+            id: `role-created-fail-${statusCode}`,
+            permissions: ['ADMINISTRATOR'],
+          },
+        }),
+      );
+      await runtime.stop();
+
+      expect(fetchSpy).toHaveBeenCalled();
+      expect(recoverySpy).toHaveBeenCalled();
+    },
+  );
+
+  test('role create 404 is treated as verified containment and does not trigger recovery', async () => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/api/v10/guilds/guild-role-create-slice-1/roles/')) {
+        return {
+          ...createFetchResponse(404),
+          json: async () => Object.freeze({ code: 'UNKNOWN_ROLE', message: 'Unknown Role' }),
+        };
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-create-slice-404',
+      'guild-role-create-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildRoleCreateEvent({
+        actorId: 'actor-role-create-404',
+        roleId: 'role-created-404',
+        role: {
+          id: 'role-created-404',
+          permissions: ['ADMINISTRATOR'],
+        },
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(recoverySpy).not.toHaveBeenCalled();
+  });
+
+  test('simultaneous role creation floods are contained while actor punishment executes once', async () => {
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-role-create-slice-6',
+      'guild-role-create-slice-1',
+    );
+
+    await runtime.start();
+    await Promise.all([
+      runtime.ingestGatewayEvent(
+        buildRoleCreateEvent({
+          actorId: 'actor-role-create-burst-1',
+          roleId: 'role-created-burst-1',
+          role: {
+            id: 'role-created-burst-1',
+            permissions: ['ADMINISTRATOR'],
+          },
+        }),
+      ),
+      runtime.ingestGatewayEvent(
+        buildRoleCreateEvent({
+          actorId: 'actor-role-create-burst-1',
+          roleId: 'role-created-burst-2',
+          role: {
+            id: 'role-created-burst-2',
+            permissions: ['ADMINISTRATOR'],
+          },
+        }),
+      ),
+    ]);
+    await runtime.stop();
+
+    const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+    const roleDeleteCalls = urls.filter((url) =>
+      url.includes('/api/v10/guilds/guild-role-create-slice-1/roles/role-created-burst-'),
+    );
+    const punishmentCalls = urls.filter(
+      (url) =>
+        url.includes('/api/v10/guilds/guild-role-create-slice-1/members/actor-role-create-burst-1') ||
+        url.includes('/api/v10/guilds/guild-role-create-slice-1/bans/actor-role-create-burst-1'),
+    );
+
+    expect(roleDeleteCalls).toHaveLength(2);
+    expect(punishmentCalls).toHaveLength(1);
   });
 });
 

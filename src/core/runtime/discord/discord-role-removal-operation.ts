@@ -156,9 +156,13 @@ export class ProductionDiscordRoleRemovalOperation implements DiscordRoleRemoval
   async removeDangerousRole(
     request: DiscordRoleRemovalOperationRequest,
   ): Promise<DiscordRoleRemovalOperationResponse> {
-    const endpoint = `${this.apiBaseUrl}/api/v${this.apiVersion}/guilds/${encodeURIComponent(
-      request.guildId,
-    )}/members/${encodeURIComponent(request.memberUserId)}/roles/${encodeURIComponent(request.roleId)}`;
+    const endpoint = request.memberUserId
+      ? `${this.apiBaseUrl}/api/v${this.apiVersion}/guilds/${encodeURIComponent(
+          request.guildId,
+        )}/members/${encodeURIComponent(request.memberUserId)}/roles/${encodeURIComponent(request.roleId)}`
+      : `${this.apiBaseUrl}/api/v${this.apiVersion}/guilds/${encodeURIComponent(request.guildId)}/roles/${encodeURIComponent(
+          request.roleId,
+        )}`;
 
     const headers: Record<string, string> = {
       Authorization: `Bot ${this.options.botToken}`,

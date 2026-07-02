@@ -24,6 +24,7 @@ import { UnauthorizedWebhookCreateDetector } from './discord/unauthorized-webhoo
 import { UnauthorizedChannelCreateDetector } from './discord/unauthorized-channel-create-detector';
 import { UnauthorizedChannelDeleteDetector } from './discord/unauthorized-channel-delete-detector';
 import { UnauthorizedRoleDeleteDetector } from './discord/unauthorized-role-delete-detector';
+import { UnauthorizedRoleCreateDetector } from './discord/unauthorized-role-create-detector';
 import { DangerousRoleGrantDetector } from './discord/dangerous-role-grant-detector';
 import {
   InMemorySecurityContextBuilder,
@@ -101,6 +102,7 @@ enum EnterpriseOperationalScenario {
   MISSING_AUTHORIZED_BOT = 'MISSING_AUTHORIZED_BOT',
   DANGEROUS_WEBHOOK_CREATION = 'DANGEROUS_WEBHOOK_CREATION',
   WEBHOOK_MODIFICATION = 'WEBHOOK_MODIFICATION',
+  UNAUTHORIZED_ROLE_CREATION = 'UNAUTHORIZED_ROLE_CREATION',
   DANGEROUS_ROLE_GRANT = 'DANGEROUS_ROLE_GRANT',
   UNAUTHORIZED_ROLE_DELETION = 'UNAUTHORIZED_ROLE_DELETION',
   PRIVILEGED_PERMISSION_ESCALATION = 'PRIVILEGED_PERMISSION_ESCALATION',
@@ -220,6 +222,12 @@ function resolveEnterpriseScenarioContract(
           actionType: PolicyActionType.WEBHOOK_DELETE,
           supportedByCanonicalDetectorPath: true,
         });
+      case EnterpriseOperationalScenario.UNAUTHORIZED_ROLE_CREATION:
+        return Object.freeze({
+          scenario: override,
+          actionType: PolicyActionType.ROLE_CREATE,
+          supportedByCanonicalDetectorPath: true,
+        });
       case EnterpriseOperationalScenario.DANGEROUS_ROLE_GRANT:
         return Object.freeze({
           scenario: override,
@@ -301,6 +309,13 @@ function resolveEnterpriseScenarioContract(
       return Object.freeze({
         scenario: EnterpriseOperationalScenario.WEBHOOK_MODIFICATION,
         actionType: PolicyActionType.WEBHOOK_DELETE,
+        supportedByCanonicalDetectorPath: true,
+      });
+    case 'ROLE_CREATE':
+    case 'GUILD_ROLE_CREATE':
+      return Object.freeze({
+        scenario: EnterpriseOperationalScenario.UNAUTHORIZED_ROLE_CREATION,
+        actionType: PolicyActionType.ROLE_CREATE,
         supportedByCanonicalDetectorPath: true,
       });
     case 'GUILD_MEMBER_UPDATE':
@@ -912,9 +927,16 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const inviteAbuse = detectionResults.find(
       (result) => result.detectorId === 'dangerous-role-invite-abuse-detector' && result.matched,
     );
-    const metadata = inviteAbuse?.metadata && typeof inviteAbuse.metadata === 'object'
+    const unauthorizedRoleCreate = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-role-create-detector' && result.matched,
+    );
+    const inviteMetadata = inviteAbuse?.metadata && typeof inviteAbuse.metadata === 'object'
       ? (inviteAbuse.metadata as Record<string, unknown>)
       : undefined;
+    const roleCreateMetadata = unauthorizedRoleCreate?.metadata && typeof unauthorizedRoleCreate.metadata === 'object'
+      ? (unauthorizedRoleCreate.metadata as Record<string, unknown>)
+      : undefined;
+    const metadata = roleCreateMetadata ?? inviteMetadata;
 
     return Object.freeze({
       punishActor: typeof metadata?.policyPunishActor === 'boolean'
@@ -1187,6 +1209,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       return ['role-grant', this.guildId, memberUserId, roleId, actorId].join(':');
     }
 
+    if (actionType === PolicyActionType.ROLE_CREATE && roleId) {
+      return ['role-create', this.guildId, roleId, actorId].join(':');
+    }
+
     if (actionType === PolicyActionType.ROLE_DELETE && roleId) {
       return ['role-delete', this.guildId, roleId, actorId].join(':');
     }
@@ -1346,6 +1372,32 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
 
     return Object.freeze({
       unauthorizedRoleDeletion: detectorResult?.matched === true,
+      isAuthorizedRole: metadata?.isAuthorizedRole === true,
+      isAuthorizedActor: metadata?.isAuthorizedActor === true,
+      isTrustedActor: metadata?.isTrustedActor === true,
+    });
+  }
+
+  private readUnauthorizedRoleCreationDetectionMetadata(
+    detectionResults: readonly DetectionResult[],
+  ): {
+    readonly unauthorizedRoleCreation: boolean;
+    readonly roleCreationPolicyViolation: boolean;
+    readonly isAuthorizedRole: boolean;
+    readonly isAuthorizedActor: boolean;
+    readonly isTrustedActor: boolean;
+  } {
+    const detectorResult = detectionResults.find(
+      (result) => result.detectorId === 'unauthorized-role-create-detector',
+    );
+
+    const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
+      ? (detectorResult.metadata as Record<string, unknown>)
+      : undefined;
+
+    return Object.freeze({
+      unauthorizedRoleCreation: detectorResult?.matched === true,
+      roleCreationPolicyViolation: metadata?.rolePolicyViolation === true,
       isAuthorizedRole: metadata?.isAuthorizedRole === true,
       isAuthorizedActor: metadata?.isAuthorizedActor === true,
       isTrustedActor: metadata?.isTrustedActor === true,
@@ -1516,6 +1568,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     isAuthorizedChannel: boolean,
     isAuthorizedActor: boolean,
     isTrustedChannelActor: boolean,
+    unauthorizedRoleCreation: boolean,
+    roleCreationPolicyViolation: boolean,
+    isAuthorizedRoleCreationRole: boolean,
+    isAuthorizedRoleCreationActor: boolean,
+    isTrustedRoleCreationActor: boolean,
     unauthorizedRoleDeletion: boolean,
     isAuthorizedRole: boolean,
     isAuthorizedRoleActor: boolean,
@@ -1536,6 +1593,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         ? (decision.metadata as Record<string, unknown>)
         : {};
     const trustedInviter = this.trustedInviterIds.includes(actorId);
+    const policyPunishRoleCreateActor = roleContainmentPolicy.punishActor && !(unauthorizedRoleCreation && rolePunishmentSuppressed);
 
     return Object.freeze({
       ...decision,
@@ -1571,6 +1629,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         isAuthorizedActor,
         isTrustedChannelActor,
         policyChannelPunishActor: channelContainmentPolicy.punishActor && !channelPunishmentSuppressed,
+        unauthorizedRoleCreation,
+        roleCreationPolicyViolation,
+        isAuthorizedRoleCreationRole,
+        isAuthorizedRoleCreationActor,
+        isTrustedRoleCreationActor,
         unauthorizedRoleDeletion,
         roleDeletionContainmentRequired: roleDeletionContainmentPolicy.containmentRequired && unauthorizedRoleDeletion,
         roleDeletionPolicyViolation: unauthorizedRoleDeletion,
@@ -1578,11 +1641,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
         isAuthorizedRoleActor,
         isTrustedRoleActor,
         policyRoleDeletePunishActor: roleDeletionContainmentPolicy.punishActor && !rolePunishmentSuppressed,
-        policyPunishActor: roleContainmentPolicy.punishActor,
+        policyPunishActor: policyPunishRoleCreateActor,
         policyNeutralizeTarget: roleContainmentPolicy.neutralizeTarget,
         protectedRole: roleContainmentPolicy.protectedRole,
         policy: Object.freeze({
-          punishActor: roleContainmentPolicy.punishActor,
+          punishActor: policyPunishRoleCreateActor,
           neutralizeTarget: roleContainmentPolicy.neutralizeTarget,
           protectedRole: roleContainmentPolicy.protectedRole,
           roleDeletePunishActor: roleDeletionContainmentPolicy.punishActor && !rolePunishmentSuppressed,
@@ -1602,6 +1665,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     this.detectorRegistry.register(new UnauthorizedWebhookCreateDetector());
     this.detectorRegistry.register(new UnauthorizedChannelCreateDetector());
     this.detectorRegistry.register(new UnauthorizedChannelDeleteDetector());
+    this.detectorRegistry.register(new UnauthorizedRoleCreateDetector());
     this.detectorRegistry.register(new UnauthorizedRoleDeleteDetector());
     this.detectorRegistry.register(new DangerousRoleGrantDetectorPluginAdapter());
     this.detectorRegistry.register(
@@ -1682,6 +1746,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       case 'BOT_ADD':
       case 'GUILD_MEMBER_ADD':
         return PolicyActionType.BOT_ADD;
+      case 'ROLE_CREATE':
+      case 'GUILD_ROLE_CREATE':
+        return PolicyActionType.ROLE_CREATE;
       case 'GUILD_MEMBER_UPDATE':
       case 'GUILD_ROLE_UPDATE':
       case 'MEMBER_ROLE_ADD':
@@ -1865,7 +1932,8 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       !effectiveDetectionResults.some(
         (result) =>
           (result.detectorId === 'dangerous-role-grant-detector' ||
-            result.detectorId === 'dangerous-role-invite-abuse-detector') &&
+            result.detectorId === 'dangerous-role-invite-abuse-detector' ||
+            result.detectorId === 'unauthorized-role-create-detector') &&
           result.matched,
       )
     ) {
@@ -1963,9 +2031,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     const botDetectionMetadata = this.readUnauthorizedBotDetectionMetadata(effectiveDetectionResults);
     const webhookDetectionMetadata = this.readUnauthorizedWebhookDetectionMetadata(effectiveDetectionResults);
     const channelDetectionMetadata = this.readUnauthorizedChannelDetectionMetadata(effectiveDetectionResults);
+    const roleCreationDetectionMetadata = this.readUnauthorizedRoleCreationDetectionMetadata(effectiveDetectionResults);
     const roleDeletionDetectionMetadata = this.readUnauthorizedRoleDeletionDetectionMetadata(effectiveDetectionResults);
     const rolePunishmentSuppressed =
-      actionType === PolicyActionType.ROLE_DELETE && roleDeletionDetectionMetadata.unauthorizedRoleDeletion
+      ((actionType === PolicyActionType.ROLE_CREATE && roleCreationDetectionMetadata.unauthorizedRoleCreation) ||
+        (actionType === PolicyActionType.ROLE_DELETE && roleDeletionDetectionMetadata.unauthorizedRoleDeletion))
         ? this.shouldSuppressRoleActorPunishment(effectiveActorId, nowMs)
         : false;
     const channelPunishmentSuppressed =
@@ -1999,6 +2069,11 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       channelDetectionMetadata.isAuthorizedChannel,
       channelDetectionMetadata.isAuthorizedActor,
       channelDetectionMetadata.isTrustedActor,
+      roleCreationDetectionMetadata.unauthorizedRoleCreation,
+      roleCreationDetectionMetadata.roleCreationPolicyViolation,
+      roleCreationDetectionMetadata.isAuthorizedRole,
+      roleCreationDetectionMetadata.isAuthorizedActor,
+      roleCreationDetectionMetadata.isTrustedActor,
       roleDeletionDetectionMetadata.unauthorizedRoleDeletion,
       roleDeletionDetectionMetadata.isAuthorizedRole,
       roleDeletionDetectionMetadata.isAuthorizedActor,

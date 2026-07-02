@@ -12,6 +12,8 @@ const DETECTION_EVENT_TO_SECURITY_ACTION_TYPE_MAP: Readonly<Record<string, Secur
   GUILD_MEMBER_UPDATE: SecurityActionType.ROLE_CREATE,
   GUILD_ROLE_UPDATE: SecurityActionType.ROLE_CREATE,
   MEMBER_ROLE_ADD: SecurityActionType.ROLE_CREATE,
+  ROLE_CREATE: SecurityActionType.ROLE_CREATE,
+  GUILD_ROLE_CREATE: SecurityActionType.ROLE_CREATE,
 };
 
 export class InMemorySecurityDetectionForwarder implements SecurityEvaluationDetectionPipeline {

@@ -110,6 +110,35 @@ test('operation classifies already absent role from 404 response', async () => {
   expect(response.error?.retryable).toBe(false);
 });
 
+test('operation deletes guild role directly when memberUserId is absent', async () => {
+  const fetchMock = jest.fn(async () =>
+    createResponse({
+      ok: true,
+      status: 204,
+      headers: { 'x-ratelimit-bucket': 'bucket-role-guild-1' },
+    }),
+  );
+
+  const operation = new ProductionDiscordRoleRemovalOperation({
+    botToken: 'token-1',
+    fetchFn: fetchMock,
+  });
+
+  const response = await operation.removeDangerousRole({
+    correlationId: 'corr-role-guild-delete',
+    guildId: 'g-1',
+    roleId: 'r-created-1',
+    reason: 'guardian unauthorized role creation containment',
+  });
+
+  expect(fetchMock).toHaveBeenCalledTimes(1);
+  const firstCall = (fetchMock.mock.calls[0] as unknown) as [string, { method: string }];
+  expect(firstCall[0]).toContain('/api/v10/guilds/g-1/roles/r-created-1');
+  expect(firstCall[0]).not.toContain('/members/');
+  expect(firstCall[1]).toMatchObject({ method: 'DELETE' });
+  expect(response.ok).toBe(true);
+});
+
 test('operation propagates permission and rate limit metadata', async () => {
   const operation = new ProductionDiscordRoleRemovalOperation({
     botToken: 'token-1',

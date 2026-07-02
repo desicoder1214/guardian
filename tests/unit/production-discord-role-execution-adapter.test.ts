@@ -97,6 +97,29 @@ test('already absent role is classified as verified success', async () => {
   expect(metadata.verification.outcome).toBe(DiscordRoleRemovalVerificationOutcome.ALREADY_ABSENT);
 });
 
+test('role removal without member target deletes guild role endpoint', async () => {
+  const calls: Array<{ method: string; url: string; headers: Record<string, string> }> = [];
+  const client: ProductionDiscordHttpClient = {
+    async request(request) {
+      calls.push(request);
+      return response({ status: 204 });
+    },
+  };
+
+  const adapter = createAdapter(client, { apiBaseUrl: 'https://discord.example', apiVersion: 10 });
+  const result = await adapter.role.removeDangerousRole({
+    correlationId: 'corr-role-guild-delete-1',
+    guildId: 'guild-1',
+    roleId: 'role-created-1',
+    idempotencyKey: 'idem-role-guild-delete-1',
+  });
+
+  expect(calls).toHaveLength(1);
+  expect(calls[0].method).toBe('DELETE');
+  expect(calls[0].url).toBe('https://discord.example/api/v10/guilds/guild-1/roles/role-created-1');
+  expect(result.status).toBe(DiscordExecutionStatus.SUCCESS);
+});
+
 test('permission failure is classified with verification metadata', async () => {
   const client: ProductionDiscordHttpClient = {
     async request() {

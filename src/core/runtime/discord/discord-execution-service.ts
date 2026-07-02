@@ -167,7 +167,7 @@ export interface DiscordBotRemovalOperation {
 export interface DiscordRoleRemovalOperationRequest {
   readonly correlationId: string;
   readonly guildId: string;
-  readonly memberUserId: string;
+  readonly memberUserId?: string;
   readonly roleId: string;
   readonly reason?: string;
 }
@@ -1417,7 +1417,7 @@ export class ProductionDiscordRoleExecutionService implements RoleExecutionServi
       });
     }
 
-    if (!normalizedRequest.guildId || !normalizedRequest.memberUserId || !normalizedRequest.roleId) {
+    if (!normalizedRequest.guildId || !normalizedRequest.roleId) {
       return freezeExecutionResult({
         status: DiscordExecutionStatus.FAILED,
         executionTimeMs: 0,
@@ -1436,7 +1436,7 @@ export class ProductionDiscordRoleExecutionService implements RoleExecutionServi
           rateLimit: { limited: false },
           error: {
             code: DiscordExecutionErrorCode.VALIDATION_ERROR,
-            message: 'guildId, memberUserId and roleId are required for production execution',
+            message: 'guildId and roleId are required for production execution',
             retryable: false,
           },
           metadata: normalizedRequest.metadata,
