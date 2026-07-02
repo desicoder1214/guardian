@@ -896,6 +896,20 @@ describe('IntegratedCanonicalGuardianRuntime webhook creation abuse vertical sli
     };
   }
 
+  function buildWebhookMutationEvent(eventName: 'WEBHOOK_UPDATE' | 'WEBHOOK_DELETE', overrides: Record<string, unknown> = {}) {
+    return {
+      t: eventName,
+      d: {
+        guildId: 'guild-webhook-slice-1',
+        actorId: 'actor-webhook-slice-1',
+        webhookId: 'webhook-dangerous-slice-1',
+        ownerIntegrationId: 'integration-untrusted-slice-1',
+        ...overrides,
+      },
+      ts: '2026-07-01T15:00:30.000Z',
+    };
+  }
+
   test('unauthorized webhook create executes webhook removal and actor punishment', async () => {
     const fetchSpy = jest.fn(async () => createFetchResponse(204));
     (globalThis as { fetch?: unknown }).fetch = fetchSpy;
@@ -1149,6 +1163,164 @@ describe('IntegratedCanonicalGuardianRuntime webhook creation abuse vertical sli
     const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
     expect(urls.some((url) => url.includes('/api/v10/webhooks/webhook-dangerous-1'))).toBe(true);
     expect(urls.some((url) => url.includes('/api/v10/webhooks/webhook-dangerous-2'))).toBe(true);
+  });
+
+  test.each(['WEBHOOK_UPDATE', 'WEBHOOK_DELETE'] as const)(
+    'unauthorized webhook %s executes removal and actor containment',
+    async (eventName) => {
+      const fetchSpy = jest.fn(async () => createFetchResponse(204));
+      (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+      const eventBus = new InMemoryEventBus();
+      const health = new RuntimeHealthService();
+      const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+      const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+      const runtime = new IntegratedCanonicalGuardianRuntime(
+        GuardianRuntimeMode.PRODUCTION,
+        runtimeManager,
+        new StubDiscordRuntimeAdapter(),
+        eventBus,
+        health,
+        loggerFactory,
+        `runtime-webhook-mutation-${eventName.toLowerCase()}`,
+        'guild-webhook-slice-1',
+      );
+
+      await runtime.start();
+      await runtime.ingestGatewayEvent(
+        buildWebhookMutationEvent(eventName, {
+          webhookId: `webhook-dangerous-${eventName.toLowerCase()}`,
+          actorId: `actor-webhook-${eventName.toLowerCase()}`,
+        }),
+      );
+      await runtime.stop();
+
+      const urls = fetchSpy.mock.calls.map((call) => String((call as unknown[])[0] ?? ''));
+      expect(urls.some((url) => url.includes(`/api/v10/webhooks/webhook-dangerous-${eventName.toLowerCase()}`))).toBe(true);
+      expect(urls.some((url) => url.includes(`/api/v10/guilds/guild-webhook-slice-1/members/actor-webhook-${eventName.toLowerCase()}`))).toBe(true);
+    },
+  );
+
+  test.each(['WEBHOOK_UPDATE', 'WEBHOOK_DELETE'] as const)(
+    'authorized webhook %s performs no containment',
+    async (eventName) => {
+      process.env.GUARDIAN_AUTHORIZED_WEBHOOK_IDS = `webhook-safe-${eventName.toLowerCase()}`;
+      const fetchSpy = jest.fn(async () => createFetchResponse(204));
+      (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+      const eventBus = new InMemoryEventBus();
+      const health = new RuntimeHealthService();
+      const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+      const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+      const runtime = new IntegratedCanonicalGuardianRuntime(
+        GuardianRuntimeMode.PRODUCTION,
+        runtimeManager,
+        new StubDiscordRuntimeAdapter(),
+        eventBus,
+        health,
+        loggerFactory,
+        `runtime-webhook-mutation-authorized-${eventName.toLowerCase()}`,
+        'guild-webhook-slice-1',
+      );
+
+      await runtime.start();
+      await runtime.ingestGatewayEvent(
+        buildWebhookMutationEvent(eventName, {
+          webhookId: `webhook-safe-${eventName.toLowerCase()}`,
+        }),
+      );
+      await runtime.stop();
+
+      expect(fetchSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  test('duplicate/replay webhook mutation events are suppressed', async () => {
+    const transport = new CapturingLogTransport();
+    const fetchSpy = jest.fn(async () => createFetchResponse(204));
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([transport]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      'runtime-webhook-mutation-replay-1',
+      'guild-webhook-slice-1',
+    );
+
+    const replayEvent = buildWebhookMutationEvent('WEBHOOK_DELETE', {
+      actorId: 'actor-webhook-mutation-replay-1',
+      webhookId: 'webhook-dangerous-mutation-replay-1',
+    });
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.ingestGatewayEvent(replayEvent);
+    await runtime.stop();
+
+    const webhookCalls = fetchSpy.mock.calls.filter((call) =>
+      String((call as unknown[])[0] ?? '').includes('/api/v10/webhooks/webhook-dangerous-mutation-replay-1'),
+    );
+    expect(webhookCalls).toHaveLength(1);
+    expect(transport.entries.some((entry) => entry.message === 'Canonical Guardian replay suppressed')).toBe(true);
+  });
+
+  test.each([404, 403, 429, 500])('webhook mutation failure (%i) is classified correctly', async (statusCode) => {
+    const fetchSpy = jest.fn(async (url: string) => {
+      if (url.includes('/api/v10/webhooks/')) {
+        return {
+          ...createFetchResponse(statusCode),
+          json: async () => Object.freeze({ code: statusCode === 404 ? 'UNKNOWN_WEBHOOK' : 'ERROR', message: 'mutation failure' }),
+        };
+      }
+
+      return createFetchResponse(204);
+    });
+    (globalThis as { fetch?: unknown }).fetch = fetchSpy;
+
+    const recoverySpy = jest.spyOn(InMemoryRecoveryEngine.prototype, 'execute');
+
+    const eventBus = new InMemoryEventBus();
+    const health = new RuntimeHealthService();
+    const loggerFactory = new LoggerFactory([new CapturingLogTransport()]);
+    const runtimeManager = new RuntimeManager(loggerFactory.createLogger(), health, eventBus);
+
+    const runtime = new IntegratedCanonicalGuardianRuntime(
+      GuardianRuntimeMode.PRODUCTION,
+      runtimeManager,
+      new StubDiscordRuntimeAdapter(),
+      eventBus,
+      health,
+      loggerFactory,
+      `runtime-webhook-mutation-fail-${statusCode}`,
+      'guild-webhook-slice-1',
+    );
+
+    await runtime.start();
+    await runtime.ingestGatewayEvent(
+      buildWebhookMutationEvent('WEBHOOK_DELETE', {
+        actorId: `actor-webhook-mutation-fail-${statusCode}`,
+        webhookId: `webhook-dangerous-mutation-fail-${statusCode}`,
+      }),
+    );
+    await runtime.stop();
+
+    expect(fetchSpy).toHaveBeenCalled();
+    if (statusCode === 404) {
+      expect(recoverySpy).not.toHaveBeenCalled();
+    } else {
+      expect(recoverySpy).toHaveBeenCalled();
+    }
   });
 });
 

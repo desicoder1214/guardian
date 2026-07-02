@@ -402,9 +402,8 @@ test('CONTAIN produces QUARANTINE_ACTOR, CREATE_INCIDENT, and NOTIFY_AUDIT mock 
   expect(result.executionResults.every((execution) => execution.success)).toBe(true);
 });
 
-test('BLOCK produces REMOVE_UNAUTHORIZED_BOT, FREEZE_WEBHOOKS, CREATE_INCIDENT, and NOTIFY_AUDIT mock executions', async () => {
+test('BLOCK produces FREEZE_WEBHOOKS, CREATE_INCIDENT, and NOTIFY_AUDIT mock executions for webhook delete', async () => {
   const orchestrator = createOrchestrator(SecurityDecision.BLOCK, (registry) => {
-    registry.register(SecurityActionType.REMOVE_UNAUTHORIZED_BOT, new RemoveUnauthorizedBotExecutor());
     registry.register(SecurityActionType.FREEZE_WEBHOOKS, new FreezeWebhooksExecutor());
     registry.register(SecurityActionType.CREATE_INCIDENT, new CreateIncidentExecutor());
     registry.register(SecurityActionType.NOTIFY_AUDIT, new NotifyAuditExecutor());
@@ -413,13 +412,11 @@ test('BLOCK produces REMOVE_UNAUTHORIZED_BOT, FREEZE_WEBHOOKS, CREATE_INCIDENT, 
   const result = await orchestrator.orchestrate(normalizedEvent(), 'actor-1', SecurityPolicyActionType.WEBHOOK_DELETE);
 
   expect(result.actionPlan.actions.map((action) => action.type)).toEqual([
-    SecurityActionType.REMOVE_UNAUTHORIZED_BOT,
     SecurityActionType.FREEZE_WEBHOOKS,
     SecurityActionType.CREATE_INCIDENT,
     SecurityActionType.NOTIFY_AUDIT,
   ]);
   expect(result.executionResults.map((execution) => execution.actionType)).toEqual([
-    SecurityActionType.REMOVE_UNAUTHORIZED_BOT,
     SecurityActionType.FREEZE_WEBHOOKS,
     SecurityActionType.CREATE_INCIDENT,
     SecurityActionType.NOTIFY_AUDIT,
@@ -475,27 +472,26 @@ test('unsupported actions are safely reported without throwing', async () => {
 
   const result = await orchestrator.orchestrate(normalizedEvent(), 'actor-1', SecurityPolicyActionType.WEBHOOK_DELETE);
 
-  expect(result.executionResults).toHaveLength(4);
-  expect(result.executionResults.map((execution) => execution.success)).toEqual([false, false, true, false]);
+  expect(result.executionResults).toHaveLength(3);
+  expect(result.executionResults.map((execution) => execution.success)).toEqual([false, true, false]);
   expect(result.executionResults.map((execution) => execution.state)).toEqual([
-    ExecutionState.SKIPPED,
     ExecutionState.SKIPPED,
     ExecutionState.SUCCESS,
     ExecutionState.SKIPPED,
   ]);
   expect(result.executionResults.map((execution) => execution.executorId)).toEqual([
-    'unsupported-executor',
     'unregistered-executor',
     'create-incident-executor',
     'unregistered-executor',
   ]);
   expect(result.executionResults[0]?.metadata).toMatchObject({
     skipped: true,
-    reason: 'Executor unsupported-executor does not support action type REMOVE_UNAUTHORIZED_BOT',
+    reason: 'No executor registered for action type FREEZE_WEBHOOKS',
   });
   expect(result.executionResults[1]?.metadata).toMatchObject({
-    skipped: true,
-    reason: 'No executor registered for action type FREEZE_WEBHOOKS',
+    mock: true,
+    sideEffectFree: true,
+    simulated: true,
   });
 });
 

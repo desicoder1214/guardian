@@ -21,6 +21,7 @@ import {
 } from './discord/detection-plugin-framework';
 import { UnauthorizedBotAddDetector } from './discord/unauthorized-bot-add-detector';
 import { UnauthorizedWebhookCreateDetector } from './discord/unauthorized-webhook-create-detector';
+import { UnauthorizedWebhookMutationDetector } from './discord/unauthorized-webhook-mutation-detector';
 import { UnauthorizedChannelCreateDetector } from './discord/unauthorized-channel-create-detector';
 import { UnauthorizedChannelDeleteDetector } from './discord/unauthorized-channel-delete-detector';
 import { UnauthorizedRoleDeleteDetector } from './discord/unauthorized-role-delete-detector';
@@ -1362,6 +1363,10 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
       return ['webhook-create', this.guildId, webhookId, actorId].join(':');
     }
 
+    if (actionType === PolicyActionType.WEBHOOK_DELETE && webhookId) {
+      return ['webhook-delete', this.guildId, webhookId, actorId].join(':');
+    }
+
     if (actionType === PolicyActionType.CHANNEL_DELETE && channelId) {
       return ['channel-delete', this.guildId, channelId, actorId].join(':');
     }
@@ -1464,7 +1469,9 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     readonly isAuthorizedIntegration: boolean;
   } {
     const detectorResult = detectionResults.find(
-      (result) => result.detectorId === 'unauthorized-webhook-create-detector',
+      (result) =>
+        result.detectorId === 'unauthorized-webhook-create-detector' ||
+        result.detectorId === 'unauthorized-webhook-mutation-detector',
     );
 
     const metadata = detectorResult?.metadata && typeof detectorResult.metadata === 'object'
@@ -1949,6 +1956,7 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
   private registerProductionDetectors(): void {
     this.detectorRegistry.register(new UnauthorizedBotAddDetector());
     this.detectorRegistry.register(new UnauthorizedWebhookCreateDetector());
+    this.detectorRegistry.register(new UnauthorizedWebhookMutationDetector());
     this.detectorRegistry.register(new UnauthorizedChannelCreateDetector());
     this.detectorRegistry.register(new UnauthorizedChannelDeleteDetector());
     this.detectorRegistry.register(new UnauthorizedRoleCreateDetector());
@@ -2289,9 +2297,12 @@ export class IntegratedCanonicalGuardianRuntime implements CanonicalGuardianRunt
     }
 
     if (
-      actionType === PolicyActionType.WEBHOOK_CREATE &&
+      (actionType === PolicyActionType.WEBHOOK_CREATE || actionType === PolicyActionType.WEBHOOK_DELETE) &&
       !effectiveDetectionResults.some(
-        (result) => result.detectorId === 'unauthorized-webhook-create-detector' && result.matched,
+        (result) =>
+          (result.detectorId === 'unauthorized-webhook-create-detector' ||
+            result.detectorId === 'unauthorized-webhook-mutation-detector') &&
+          result.matched,
       )
     ) {
       this.logger.info('Canonical Guardian webhook containment not required', {

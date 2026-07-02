@@ -154,6 +154,56 @@ function resolveWebhookContainmentActions(metadata: unknown): readonly SecurityA
   return Object.freeze(actions);
 }
 
+function shouldApplyWebhookMutationContainment(metadata: unknown): boolean {
+  const metadataRecord = readRecord(metadata);
+
+  return (
+    readBoolean(metadataRecord, 'webhookContainmentRequired', 'webhook_containment_required') === true ||
+    readBoolean(metadataRecord, 'unauthorizedWebhookDetected', 'unauthorized_webhook_detected') === true ||
+    readBoolean(metadataRecord, 'webhookPolicyViolation', 'webhook_policy_violation') === true ||
+    (typeof metadataRecord?.webhookId === 'string' && metadataRecord.webhookId.length > 0)
+  );
+}
+
+function resolveWebhookMutationContainmentActions(metadata: unknown): readonly SecurityActionType[] {
+  const metadataRecord = readRecord(metadata);
+  const policyRecord = readRecord(metadataRecord?.policy);
+
+  const containmentRequired = readBoolean(
+    metadataRecord,
+    'webhookContainmentRequired',
+    'webhook_containment_required',
+  ) ?? true;
+  const punishActor = readBoolean(
+    metadataRecord,
+    'policyWebhookPunishActor',
+    'policy_webhook_punish_actor',
+  ) ?? readBoolean(
+    policyRecord,
+    'punishActor',
+    'punish_actor',
+  ) ?? true;
+  const actorId =
+    (typeof metadataRecord?.actorId === 'string' && metadataRecord.actorId.length > 0
+      ? metadataRecord.actorId
+      : undefined) ?? 'unknown-actor';
+  const punishableActor = actorId !== 'unknown-actor';
+
+  if (!containmentRequired) {
+    return Object.freeze([SecurityActionType.NONE]);
+  }
+
+  const actions: SecurityActionType[] = [SecurityActionType.FREEZE_WEBHOOKS];
+
+  if (punishActor && punishableActor) {
+    actions.push(SecurityActionType.QUARANTINE_ACTOR);
+  }
+
+  actions.push(SecurityActionType.CREATE_INCIDENT, SecurityActionType.NOTIFY_AUDIT);
+
+  return Object.freeze(actions);
+}
+
 function resolveChannelDeletionContainmentActions(metadata: unknown): readonly SecurityActionType[] {
   const metadataRecord = readRecord(metadata);
   const policyRecord = readRecord(metadataRecord?.policy);
@@ -465,6 +515,8 @@ export class InMemorySecurityActionPlanner implements SecurityActionPlanner {
         ? resolveRoleEscalationActions(decisionModel.metadata)
         : decisionModel.decision === SecurityDecision.BLOCK && decisionModel.actionType === 'WEBHOOK_CREATE'
           ? resolveWebhookContainmentActions(decisionModel.metadata)
+          : decisionModel.decision === SecurityDecision.BLOCK && decisionModel.actionType === 'WEBHOOK_DELETE'
+            ? resolveWebhookMutationContainmentActions(decisionModel.metadata)
           : decisionModel.decision === SecurityDecision.BLOCK &&
               decisionModel.actionType === 'CHANNEL_CREATE' &&
               shouldApplyChannelCreationContainment(decisionModel.metadata)
