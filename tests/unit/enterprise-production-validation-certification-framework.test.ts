@@ -72,13 +72,15 @@ describe('InMemoryEnterpriseProductionValidationCertificationFramework', () => {
       concurrentAttackBurst: 6,
     });
 
-    expect(report.reportVersion).toBe('v0.5.0');
+    expect(report.reportVersion).toBe('v0.5.1');
     expect(report.drillReports).toHaveLength(12);
     expect(report.coverage.totalDrills).toBe(12);
     expect(report.coverage.failedDrills).toBe(0);
     expect(report.success).toBe(true);
+    expect(report.metrics.gatewayEventReceiveLatencyMs).toBeGreaterThan(0);
     expect(report.metrics.detectionLatencyMs).toBeGreaterThan(0);
     expect(report.metrics.attributionLatencyMs).toBeGreaterThan(0);
+    expect(report.metrics.evaluationLatencyMs).toBeGreaterThan(0);
     expect(report.metrics.planningLatencyMs).toBeGreaterThan(0);
     expect(report.metrics.dispatchLatencyMs).toBeGreaterThan(0);
     expect(report.metrics.executionLatencyMs).toBeGreaterThan(0);
@@ -86,6 +88,12 @@ describe('InMemoryEnterpriseProductionValidationCertificationFramework', () => {
     expect(report.metrics.retryCount).toBeGreaterThan(0);
     expect(report.metrics.replaySuppressionEffectiveness).toBeGreaterThanOrEqual(0);
     expect(report.metrics.recoverySuccessRate).toBeGreaterThan(0);
+    expect(report.healthSummary.runtimeStatus.healthy).toBe(true);
+    expect(report.healthSummary.eventPipeline.healthy).toBe(true);
+    expect(report.runtimeDiagnostics.maxQueueDepth).toBeGreaterThanOrEqual(1);
+    expect(report.latencySummary.endToEnd.averageMs).toBeGreaterThan(0);
+    expect(report.bottlenecks.length).toBeGreaterThan(0);
+    expect(report.readinessChecks.allChecksPassing).toBe(true);
     expect(report.verdict).toBe(EnterpriseCertificationVerdict.CERTIFIED_WITH_OBSERVATIONS);
     expect(report.outstandingFailures).toEqual([]);
 
@@ -124,6 +132,12 @@ describe('InMemoryEnterpriseProductionValidationCertificationFramework', () => {
         EnterpriseChaosInjection.MISSING_AUDIT_LOGS,
         EnterpriseChaosInjection.CONCURRENT_ATTACKS,
         EnterpriseChaosInjection.PARTIAL_EXECUTION,
+        EnterpriseChaosInjection.EVENT_BURST,
+        EnterpriseChaosInjection.SUSTAINED_EVENT_STREAM,
+        EnterpriseChaosInjection.EXECUTOR_SATURATION,
+        EnterpriseChaosInjection.RECOVERY_QUEUE_GROWTH,
+        EnterpriseChaosInjection.RATE_LIMIT_BACKPRESSURE,
+        EnterpriseChaosInjection.SLOW_DOWNSTREAM_EXECUTION,
       ]),
     });
 
@@ -139,10 +153,19 @@ describe('InMemoryEnterpriseProductionValidationCertificationFramework', () => {
         EnterpriseChaosInjection.MISSING_AUDIT_LOGS,
         EnterpriseChaosInjection.CONCURRENT_ATTACKS,
         EnterpriseChaosInjection.PARTIAL_EXECUTION,
+        EnterpriseChaosInjection.EVENT_BURST,
+        EnterpriseChaosInjection.SUSTAINED_EVENT_STREAM,
+        EnterpriseChaosInjection.EXECUTOR_SATURATION,
+        EnterpriseChaosInjection.RECOVERY_QUEUE_GROWTH,
+        EnterpriseChaosInjection.RATE_LIMIT_BACKPRESSURE,
+        EnterpriseChaosInjection.SLOW_DOWNSTREAM_EXECUTION,
       ]),
     );
     expect(report.coverage.failedDrills).toBeGreaterThan(0);
     expect(report.outstandingFailures.length).toBeGreaterThan(0);
+    expect(report.runtimeDiagnostics.backpressureDetected).toBe(true);
+    expect(report.recoveryStatistics.requiredCount).toBeGreaterThan(0);
+    expect(report.readinessChecks.allChecksPassing).toBe(false);
     expect(report.verdict).toBe(EnterpriseCertificationVerdict.NOT_CERTIFIABLE);
   });
 
